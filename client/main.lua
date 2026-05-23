@@ -1,0 +1,508 @@
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║                  DG HANDLING CONTROL - CLIENT                           ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+
+local isOpen      = false
+local savedData   = {}   -- [modelHash] = handling table, loaded from server
+local currentVeh  = 0
+local reapplyThread = nil
+
+-- ─── Handling field definitions ───────────────────────────────────────────────
+-- Each entry: { key, getter, setter, min, max, step, label, cat, desc, tip }
+local HANDLING_FIELDS = {
+    -- ── Engine ──────────────────────────────────────────────────────────────
+    {
+        key='fMass', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=1, max=100000, step=10, label='Mass (kg)', cat='Engine',
+        desc='The total weight of the vehicle in kilograms. Heavier vehicles carry more momentum, have better traction under power, and are harder to push sideways. Lighter vehicles accelerate faster but can feel twitchy and get unsettled by bumps or collisions.',
+        tip='↑ Higher = More momentum, harder to stop & turn. ↓ Lower = Quicker to speed up, easier to spin out.',
+    },
+    {
+        key='fInitialDragCoeff', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=200, step=0.1, label='Drag Coefficient', cat='Engine',
+        desc='Air resistance acting against the vehicle at speed. A higher value means the car hits its top speed sooner and loses velocity quickly when you lift off throttle. Lower drag allows higher theoretical top speeds and longer coasting.',
+        tip='↑ Higher = Lower top speed, more drag. ↓ Lower = More aerodynamic, higher top speed.',
+    },
+    {
+        key='fDownforceModifier', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=100, step=0.1, label='Downforce Modifier', cat='Engine',
+        desc='Simulates aerodynamic downforce pressing the tyres into the road at speed. More downforce dramatically improves high-speed cornering and stability but has no effect at low speeds. This is the "wings and splitter" stat.',
+        tip='↑ Higher = Better high-speed grip and stability. ↓ Lower = Car feels lighter at speed, more oversteer.',
+    },
+    {
+        key='fDriveBiasFront', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=1, step=0.01, label='Drive Bias Front (0=RWD 1=FWD)', cat='Engine',
+        desc='Controls how power is split between the front and rear wheels. 0.0 = pure Rear-Wheel Drive (sporty, prone to oversteer). 1.0 = pure Front-Wheel Drive (stable, prone to understeer). 0.5 = balanced All-Wheel Drive.',
+        tip='0.0 = RWD (rear spins, drifty). 0.5 = AWD (balanced). 1.0 = FWD (front pulls, understeers).',
+    },
+    {
+        key='nInitialDriveGears', getter='GetVehicleHandlingInt', setter='SetVehicleHandlingInt',
+        min=1, max=10, step=1, label='Number of Gears', cat='Engine',
+        desc='How many forward gears the gearbox has. More gears spread the power band wider, giving smoother acceleration and potentially a higher top speed. Fewer gears mean stronger individual gear pulls but a lower ceiling.',
+        tip='↑ More gears = Smoother power, higher top speed. ↓ Fewer = Punchier but hits rev limiter sooner.',
+    },
+    {
+        key='fInitialDriveForce', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.01, max=5, step=0.01, label='Drive Force (Torque)', cat='Engine',
+        desc='The engine\'s torque output multiplier — essentially how hard the drivetrain pushes the wheels. Higher values give explosive acceleration but cause wheelspin, especially on low-traction surfaces. This is one of the most impactful stats.',
+        tip='↑ Higher = Faster acceleration, more wheelspin. ↓ Lower = Smoother power delivery, less wheelspin.',
+    },
+    {
+        key='fDriveInertia', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.01, max=5, step=0.01, label='Drive Inertia (Rev Speed)', cat='Engine',
+        desc='How quickly the engine revs up and down in response to throttle input. Lower values feel like a high-revving sports car — instant response. Higher values add a "flywheel" weight effect, making the engine feel heavy and laggy like a diesel.',
+        tip='↑ Higher = Sluggish throttle response, laggy rev. ↓ Lower = Instant revs, snappy throttle.',
+    },
+    {
+        key='fClutchChangeRateScaleUpShift', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.1, max=20, step=0.1, label='Clutch Rate Up-Shift', cat='Engine',
+        desc='How quickly the clutch re-engages when shifting up a gear. A higher value means almost no power interruption — gears slam in instantly like a racing sequential gearbox. Lower values create a longer neutral period between gears.',
+        tip='↑ Higher = Faster up-shifts, near-seamless power delivery. ↓ Lower = Noticeable power gap between gears.',
+    },
+    {
+        key='fClutchChangeRateScaleDownShift', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.1, max=20, step=0.1, label='Clutch Rate Down-Shift', cat='Engine',
+        desc='How quickly the clutch re-engages when shifting down a gear. Higher values allow rapid heel-toe style downshifts with strong engine braking. Lower values make downshifts lazy — useful to prevent rear lock-up when trail braking.',
+        tip='↑ Higher = Aggressive engine braking on downshift. ↓ Lower = Gentle downshifts, less lock-up risk.',
+    },
+    {
+        key='fInitialDriveMaxFlatVel', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=10, max=500, step=1, label='Max Speed (km/h)', cat='Engine',
+        desc='The absolute top speed the vehicle can reach on flat ground in km/h. This value acts as a hard ceiling — the engine will stop producing forward force above this speed. Gear ratios distribute torque across this range.',
+        tip='↑ Higher = Faster top speed. ↓ Lower = Vehicle is capped sooner. Set to match your intended use.',
+    },
+
+    -- ── Brakes ──────────────────────────────────────────────────────────────
+    {
+        key='fBrakeForce', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.01, max=5, step=0.01, label='Brake Force', cat='Brakes',
+        desc='The total stopping power of the brakes. Higher values dramatically shorten stopping distances but can cause wheel lock-up if the traction curve is not also tuned. Essential for performance tuning — weak brakes on a fast car is dangerous.',
+        tip='↑ Higher = Shorter stops, risk of lock-up. ↓ Lower = Longer stops, gentler braking.',
+    },
+    {
+        key='fBrakeBiasFront', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=1, step=0.01, label='Brake Bias Front', cat='Brakes',
+        desc='Distributes brake force between front and rear wheels. 0.5 is balanced. Moving toward 1.0 puts more force on the front — great for straight-line stability but causes understeer under braking. Moving toward 0.0 biases the rear — helps rotation but risks spinning.',
+        tip='↑ Higher = More front braking, stable but understeers. ↓ Lower = Rear bias, rotation but spin risk. 0.6–0.7 is a typical performance tune.',
+    },
+    {
+        key='fHandBrakeForce', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=5, step=0.01, label='Handbrake Force', cat='Brakes',
+        desc='How hard the rear wheels lock when the handbrake is pulled. A strong handbrake makes the rear snap around quickly — great for initiating drifts and tight hairpins. Too weak and the car won\'t rotate; too strong and it\'ll spin uncontrollably.',
+        tip='↑ Higher = Rear locks fast, good for drifts and handbrake turns. ↓ Lower = Subtler handbrake, harder to initiate rotation.',
+    },
+
+    -- ── Steering ────────────────────────────────────────────────────────────
+    {
+        key='fSteeringLock', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=10, max=90, step=0.5, label='Steering Lock (degrees)', cat='Steering',
+        desc='The maximum angle the front wheels can turn from center in degrees. Higher lock gives a tighter turning radius and makes the car feel more nimble at low speeds. Too high at speed causes a twitchy, unstable feel. Drift cars typically run very high lock (45°+).',
+        tip='↑ Higher = Tighter turning radius, twitchy at speed. ↓ Lower = Stable at speed, wider turns. Typical: 30–40°. Drift: 50–65°.',
+    },
+    {
+        key='fSteeringLockRatio', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=1, step=0.01, label='Steering Lock Ratio', cat='Steering',
+        desc='Controls the speed/ratio at which the steering reaches its maximum lock angle. Higher values make the wheel reach full lock more quickly with less input — very responsive. Lower values require more steering wheel rotation to reach the limit.',
+        tip='↑ Higher = Steering is quicker to reach full lock. ↓ Lower = More wheel movement needed, more progressive feel.',
+    },
+
+    -- ── Traction ────────────────────────────────────────────────────────────
+    {
+        key='fTractionCurveMax', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.1, max=5, step=0.01, label='Traction Curve Max (Peak Grip)', cat='Traction',
+        desc='The maximum traction force available before the tyre begins to slip. Think of this as how much grip you have at the very edge — the peak of the traction curve. Higher values mean the tyres can handle more lateral and longitudinal load before sliding.',
+        tip='↑ Higher = More grip before sliding, faster cornering. ↓ Lower = Tyres slip earlier, easier to drift.',
+    },
+    {
+        key='fTractionCurveMin', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.1, max=5, step=0.01, label='Traction Curve Min (Slip Grip)', cat='Traction',
+        desc='The traction available once the tyre IS sliding. This is how much control you retain during a slide or wheelspin. If this is close to TractionMax, the car recovers grip quickly and feels predictable. A large gap between Max and Min creates a snappy, sudden breakaway.',
+        tip='↑ Higher (close to Max) = Smooth, predictable slides. ↓ Lower = Sudden snap oversteer, harder to catch.',
+    },
+    {
+        key='fTractionCurveLateral', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=1, max=90, step=0.5, label='Traction Curve Lateral (Slip Angle)', cat='Traction',
+        desc='The slip angle in degrees at which the tyre reaches peak lateral grip. A lower value means the tyre peaks quickly at small angles — very responsive but snappy. Higher values let you run more slip angle before peak grip — better for drifting and more progressive feel.',
+        tip='↑ Higher angle = More progressive, drift-friendly. ↓ Lower angle = Tyre peaks fast, very grippy but can snap.',
+    },
+    {
+        key='fTractionSpringDeltaMax', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=1, step=0.01, label='Traction Spring Delta Max', cat='Traction',
+        desc='The maximum wheel displacement (in meters) that still allows full traction generation. On rough terrain or mid-air, wheels can deflect. This value sets how much deflection is allowed before traction starts degrading — important for off-road tuning.',
+        tip='↑ Higher = Maintains grip over larger bumps and wheel travel. ↓ Lower = Traction degrades quickly off smooth tarmac.',
+    },
+    {
+        key='fLowSpeedTractionLossMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=10, step=0.1, label='Low-Speed Traction Loss', cat='Traction',
+        desc='A multiplier for traction loss specifically at low speeds — simulates difficulty getting power down from a standing start. High values cause exaggerated wheelspin off the line, great for a burnout/drag race feel. Set to 0 for maximum traction at launch.',
+        tip='↑ Higher = More wheelspin off the line, burnout-prone. ↓ Lower (or 0) = Maximum launch traction, less fun but faster.',
+    },
+    {
+        key='fCamberStiffnesss', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-10, max=10, step=0.1, label='Camber Stiffness', cat='Traction',
+        desc='How much the tyre\'s camber angle affects its stiffness and grip. Positive values increase grip when the wheel leans outward (like during a corner). Negative values simulate the opposite. Most road cars sit near 0. Affects the feel of cornering transitions.',
+        tip='Positive = More grip as wheel cambers out in corners. Negative = Less grip. Near 0 is typical for road cars.',
+    },
+    {
+        key='fTractionBiasFront', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=1, step=0.01, label='Traction Bias Front', cat='Traction',
+        desc='Splits available traction force between front and rear axles. 0.5 = equal. Higher values give the front tyres more traction budget — the front grips harder but the rear breaks away sooner (oversteer). Lower values give the rear more grip — better acceleration but the front may wash out (understeer) in corners.',
+        tip='↑ Higher = Front grips more, rear can oversteer. ↓ Lower = Rear grips more, front can understeer. 0.5 = balanced.',
+    },
+    {
+        key='fTractionLossMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=10, step=0.1, label='Traction Loss Multiplier', cat='Traction',
+        desc='A global multiplier for how much traction is lost on any surface. Higher values make the car feel like it\'s always on a slippery surface — wet grass, ice — even on tarmac. Use higher values for a purposely slippery, drift-oriented tune. Lower values tighten everything up.',
+        tip='↑ Higher = Slippier overall, drifty everywhere. ↓ Lower = Grippy everywhere. 1.0 = stock behaviour.',
+    },
+
+    -- ── Suspension ──────────────────────────────────────────────────────────
+    {
+        key='fSuspensionForce', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.5, max=20, step=0.1, label='Suspension Force (Spring Stiffness)', cat='Suspension',
+        desc='The stiffness of the suspension springs. A stiffer setup (higher value) keeps the car flat in corners and responds quickly to inputs — essential for track cars. Softer springs (lower value) absorb road imperfections better but cause more body roll and dive under braking.',
+        tip='↑ Higher = Stiffer, less roll, more responsive. ↓ Lower = Softer, more comfortable, more body lean.',
+    },
+    {
+        key='fSuspensionCompDamp', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.1, max=5, step=0.01, label='Suspension Comp Damping', cat='Suspension',
+        desc='Compression damping controls how quickly the suspension collapses when hitting a bump or braking. Higher values slow the compression down, preventing the car from "diving" into corners or over crests. Too high and the car becomes harsh and bounces over bumps.',
+        tip='↑ Higher = Slower compression, less dive & squat. ↓ Lower = Quick to compress, more bounce over bumps.',
+    },
+    {
+        key='fSuspensionReboundDamp', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0.1, max=5, step=0.01, label='Suspension Rebound Damping', cat='Suspension',
+        desc='Rebound damping controls how quickly the suspension extends back after being compressed. Slow rebound (high value) keeps the tyre planted to the road after a bump. Fast rebound (low value) causes the car to "bounce" back violently, temporarily losing grip.',
+        tip='↑ Higher = Slow return, tyre stays planted. ↓ Lower = Fast bounce-back, may hop or skip on rough roads.',
+    },
+    {
+        key='fSuspensionUpperLimit', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-1, max=1, step=0.01, label='Suspension Upper Limit (m)', cat='Suspension',
+        desc='The maximum distance in meters the suspension can extend upward from its neutral position. This limits how high the wheel can travel into the wheel arch. Reduce this to prevent wheels from clipping body panels, or increase it for more upward wheel travel.',
+        tip='↑ Higher = More upward wheel travel allowed. ↓ Lower = Limits upward travel, can reduce visual clipping.',
+    },
+    {
+        key='fSuspensionLowerLimit', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-1, max=0, step=0.01, label='Suspension Lower Limit (m)', cat='Suspension',
+        desc='The maximum distance in meters the suspension can compress downward (droop). A less negative value means the wheel can\'t travel far downward — the car feels more rigid. A more negative value allows more droop, useful for off-road articulation.',
+        tip='More negative = More downward wheel travel (good for off-road). Less negative = Stiffer compression limit.',
+    },
+    {
+        key='fSuspensionRaise', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-1, max=1, step=0.01, label='Suspension Raise (Ride Height)', cat='Suspension',
+        desc='Offsets the vehicle\'s ride height from its default position. Positive values raise the car — great for off-road or trucks. Negative values lower the car toward the ground — lowers the center of gravity and improves aerodynamics, but risks bottoming out.',
+        tip='↑ Positive = Raises ride height (off-road, trucks). ↓ Negative = Lowers car (slammed, track, better CoG).',
+    },
+    {
+        key='fSuspensionBiasFront', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=1, step=0.01, label='Suspension Bias Front', cat='Suspension',
+        desc='Distributes suspension stiffness between front and rear axles. 0.5 is balanced. Higher values make the front stiffer — reduces understeer but causes more rear squat. Lower values stiffen the rear — reduces oversteer but increases front dive under braking.',
+        tip='↑ Higher = Stiffer front (less understeer). ↓ Lower = Stiffer rear (less oversteer). 0.5 = balanced.',
+    },
+    {
+        key='fAntiRollBarForce', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=5, step=0.01, label='Anti-Roll Bar Force', cat='Suspension',
+        desc='The strength of the anti-roll bars which resist body roll in corners. Higher values keep the car flatter in corners — better for grip driving. Lower values allow more body roll — the car leans more but can feel more communicative. Zero removes all sway bar effect.',
+        tip='↑ Higher = Flatter in corners, more grip. ↓ Lower = More body lean, softer feel. 0 = no anti-roll bars.',
+    },
+    {
+        key='fAntiRollBarBiasFront', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=1, step=0.01, label='Anti-Roll Bar Bias Front', cat='Suspension',
+        desc='How much anti-roll force is applied to the front axle vs the rear. Higher values stiffen the front roll bar more — this reduces front grip and causes understeer. Lower values stiffen the rear more — this reduces rear grip and promotes oversteer.',
+        tip='↑ Higher front bias = Understeer tendency. ↓ Lower (more rear) = Oversteer tendency. 0.5 = neutral balance.',
+    },
+    {
+        key='fRollCentreHeightFront', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-2, max=2, step=0.01, label='Roll Centre Height Front (m)', cat='Suspension',
+        desc='The height of the front suspension\'s roll center above the ground. Higher roll centers reduce body roll geometrically but can cause "jacking" — the car lifting on one side. Lower roll centers allow more roll but are more stable. This directly affects handling balance.',
+        tip='↑ Higher = Less roll, more jacking tendency. ↓ Lower = More roll, more stable geometry.',
+    },
+    {
+        key='fRollCentreHeightRear', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-2, max=2, step=0.01, label='Roll Centre Height Rear (m)', cat='Suspension',
+        desc='The height of the rear suspension\'s roll center. Adjusting this relative to the front roll center changes how the car transitions through corners. A higher rear roll center than front promotes oversteer; lower rear promotes understeer.',
+        tip='↑ Higher rear vs front = Oversteer tendency. ↓ Lower rear vs front = Understeer tendency.',
+    },
+
+    -- ── Damage ──────────────────────────────────────────────────────────────
+    {
+        key='fCollisionDamageMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=10, step=0.1, label='Collision Damage Mult', cat='Damage',
+        desc='Multiplier for damage received from physical collisions with other vehicles, objects, and the environment. Set to 0 to make the vehicle completely immune to impact damage (effectively a god-mode hull). 1.0 = stock GTA damage. Higher values = glass cannon.',
+        tip='0 = No collision damage. 1.0 = Normal damage. ↑ Higher = Very fragile. ↓ Lower = Tougher hull.',
+    },
+    {
+        key='fWeaponDamageMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=10, step=0.1, label='Weapon Damage Mult', cat='Damage',
+        desc='Multiplier for damage the vehicle takes from weapons — bullets, explosions, melee. Setting to 0 makes the vehicle bulletproof and explosion-resistant. 1.0 = standard GTA vulnerability. Use 0 for admin or special vehicles that should not be destroyable.',
+        tip='0 = Bulletproof/explosion-proof. 1.0 = Normal. ↑ Higher = Destroyed by few shots.',
+    },
+    {
+        key='fDeformationDamageMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=10, step=0.1, label='Deformation Damage Mult', cat='Damage',
+        desc='Controls how much the vehicle body visually deforms on impact — crushed panels, bent hoods, etc. Set to 0 and the car will always look pristine no matter how hard you crash. Higher values make the bodywork crumple dramatically. Does not affect health, only visuals.',
+        tip='0 = No body deformation (always clean). ↑ Higher = Dramatic crumpling on impact.',
+    },
+    {
+        key='fEngineDamageMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=0, max=10, step=0.1, label='Engine Damage Mult', cat='Damage',
+        desc='How quickly the engine takes damage from collisions, overheating, or weapons. Low values mean the engine is extremely tough — useful for race/pursuit vehicles. High values make the engine fragile — one good crash kills it. Set to 0 for an indestructible engine.',
+        tip='0 = Indestructible engine. ↑ Higher = Engine dies quickly from damage or abuse.',
+    },
+
+    -- ── Misc ────────────────────────────────────────────────────────────────
+    {
+        key='fPetrolTankVolume', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=1, max=200, step=1, label='Petrol Tank Volume (L)', cat='Misc',
+        desc='The volume of the fuel tank in liters. In vanilla GTA this is mostly visual/informational but frameworks with fuel systems (qb-fuel, LegacyFuel, etc.) will use this value to determine how long the vehicle can run before needing refueling.',
+        tip='Affects fuel system mods. Larger tank = longer range before empty.',
+    },
+    {
+        key='fOilVolume', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=1, max=20, step=0.1, label='Oil Volume (L)', cat='Misc',
+        desc='The volume of the engine oil reservoir in liters. Primarily informational in vanilla GTA but can be used by custom frameworks or oil leak mechanics. Not a commonly tuned value for performance.',
+        tip='Mostly informational. Used by some framework oil/engine mechanics.',
+    },
+    {
+        key='fSeatOffsetDistX', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-2, max=2, step=0.01, label='Seat Offset X (Left/Right)', cat='Misc',
+        desc='Offsets the driver seat position along the X axis (left/right). This is a cosmetic adjustment that affects where the camera is positioned inside the vehicle in first-person view. Does not affect vehicle performance.',
+        tip='Negative = shifts seat left. Positive = shifts seat right. Cosmetic only.',
+    },
+    {
+        key='fSeatOffsetDistY', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-2, max=2, step=0.01, label='Seat Offset Y (Forward/Back)', cat='Misc',
+        desc='Offsets the driver seat position along the Y axis (forward/backward in the vehicle). Adjusts the first-person camera position inside the cabin. Useful for custom vehicles where the seat is not properly positioned.',
+        tip='Negative = shifts seat forward. Positive = shifts seat backward. Cosmetic only.',
+    },
+    {
+        key='fSeatOffsetDistZ', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat',
+        min=-2, max=2, step=0.01, label='Seat Offset Z (Up/Down)', cat='Misc',
+        desc='Offsets the driver seat position along the Z axis (up/down). Raises or lowers the driver\'s eye level in first-person view. Use this to fix custom vehicles where the camera clips into the roof or floats above it.',
+        tip='Negative = lower seat. Positive = raise seat. Cosmetic only.',
+    },
+    {
+        key='nMonetaryValue', getter='GetVehicleHandlingInt', setter='SetVehicleHandlingInt',
+        min=0, max=9999999, step=1000, label='Monetary Value ($)', cat='Misc',
+        desc='The in-game monetary value of the vehicle used by GTA internally for insurance calculations and some script systems. Does not affect performance. Can be read by custom scripts to calculate impound fees, insurance payouts, or vehicle worth.',
+        tip='Cosmetic/system value. Used for in-game economy scripts and insurance calculations.',
+    },
+}
+
+-- ─── Helpers ──────────────────────────────────────────────────────────────────
+local function getModelName(veh)
+    return string.lower(GetLabelText(GetDisplayNameFromVehicleModel(GetEntityModel(veh))))
+end
+
+local function readAllFields(veh)
+    local out = {}
+    for _, f in ipairs(HANDLING_FIELDS) do
+        if f.getter == 'GetVehicleHandlingFloat' then
+            out[f.key] = GetVehicleHandlingFloat(veh, 'CHandlingData', f.key)
+        elseif f.getter == 'GetVehicleHandlingInt' then
+            out[f.key] = GetVehicleHandlingInt(veh, 'CHandlingData', f.key)
+        end
+    end
+    return out
+end
+
+local function applyHandling(veh, data)
+    for _, f in ipairs(HANDLING_FIELDS) do
+        local val = data[f.key]
+        if val ~= nil then
+            if f.setter == 'SetVehicleHandlingFloat' then
+                SetVehicleHandlingFloat(veh, 'CHandlingData', f.key, val + 0.0)
+            elseif f.setter == 'SetVehicleHandlingInt' then
+                SetVehicleHandlingInt(veh, 'CHandlingData', f.key, math.floor(val))
+            end
+        end
+    end
+end
+
+-- ─── Auto-apply on enter ──────────────────────────────────────────────────────
+local function findPresetForModel(modelKey)
+    -- New format: entries stored by custom name with _modelKey inside
+    for _, entry in pairs(savedData) do
+        if type(entry) == 'table' and entry._modelKey == modelKey then
+            return entry
+        end
+    end
+    -- Legacy format: direct model-hash key without _modelKey field (old saves)
+    local legacy = savedData[modelKey]
+    if type(legacy) == 'table' and not legacy._modelKey then
+        return legacy
+    end
+    return nil
+end
+
+if Config.AutoApplyOnEnter then
+    CreateThread(function()
+        while true do
+            Wait(Config.ReapplyInterval)
+            local ped = PlayerPedId()
+            local veh = GetVehiclePedIsIn(ped, false)
+            if veh ~= 0 then
+                local modelKey = tostring(GetEntityModel(veh))
+                local preset   = findPresetForModel(modelKey)
+                if preset then
+                    applyHandling(veh, preset)
+                end
+            end
+        end
+    end)
+end
+
+-- ─── NUI open/close ──────────────────────────────────────────────────────────
+local function openEditor()
+    local ped = PlayerPedId()
+    local veh = GetVehiclePedIsIn(ped, false)
+    if veh == 0 then
+        SendNUIMessage({ type = 'open', fields = HANDLING_FIELDS, current = {}, modelName = 'NO VEHICLE', savedMap = savedData })
+    else
+        currentVeh = veh
+        local model    = GetEntityModel(veh)
+        local modelKey = tostring(model)
+        local current  = readAllFields(veh)
+        local displayName = GetDisplayNameFromVehicleModel(model)
+        SendNUIMessage({
+            type      = 'open',
+            fields    = HANDLING_FIELDS,
+            current   = current,
+            modelName = displayName,
+            modelKey  = modelKey,
+            savedMap  = savedData,
+        })
+    end
+    SetNuiFocus(true, true)
+    isOpen = true
+end
+
+local function closeEditor()
+    SetNuiFocus(false, false)
+    isOpen = false
+    SendNUIMessage({ type = 'close' })
+end
+
+-- ─── Command ──────────────────────────────────────────────────────────────────
+-- Permission is checked server-side; IsPlayerAceAllowed is a server-only native.
+RegisterCommand(Config.OpenCommand, function()
+    if isOpen then
+        closeEditor()
+    else
+        TriggerServerEvent('dg-handlingcontrol:server:requestOpen')
+    end
+end, false)
+
+-- Server grants/denies the open request
+RegisterNetEvent('dg-handlingcontrol:client:openGranted')
+AddEventHandler('dg-handlingcontrol:client:openGranted', function()
+    openEditor()
+end)
+
+-- ─── NUI Callbacks ───────────────────────────────────────────────────────────
+
+-- Live-apply a single field change
+RegisterNUICallback('applyField', function(data, cb)
+    local veh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if veh ~= 0 and Config.LivePreview then
+        local f = data.field
+        local val = data.value
+        if data.isInt then
+            SetVehicleHandlingInt(veh, 'CHandlingData', f, math.floor(val))
+        else
+            SetVehicleHandlingFloat(veh, 'CHandlingData', f, val + 0.0)
+        end
+    end
+    cb('ok')
+end)
+
+-- Apply a full handling snapshot (when loading a preset)
+RegisterNUICallback('applyAll', function(data, cb)
+    local veh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if veh ~= 0 then
+        applyHandling(veh, data.handling)
+    end
+    cb('ok')
+end)
+
+-- Read current live values from vehicle (refresh)
+RegisterNUICallback('readFields', function(_, cb)
+    local veh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if veh ~= 0 then
+        currentVeh = veh
+        cb(readAllFields(veh))
+    else
+        cb({})
+    end
+end)
+
+-- Save preset for a model to server
+RegisterNUICallback('saveHandling', function(data, cb)
+    local presetName = data.presetName
+    local modelKey   = data.modelKey
+    local handling   = data.handling
+    if type(presetName) ~= 'string' or presetName == '' then cb('err') return end
+    -- Store locally with _modelKey so auto-apply can find it by vehicle model
+    local entry = { _modelKey = modelKey }
+    for k, v in pairs(handling) do entry[k] = v end
+    savedData[presetName] = entry
+    TriggerServerEvent('dg-handlingcontrol:server:save', presetName, modelKey, handling)
+    cb('ok')
+end)
+
+-- Delete a saved preset
+RegisterNUICallback('deleteHandling', function(data, cb)
+    local presetName = data.modelKey  -- JS still sends this field as 'modelKey'
+    savedData[presetName] = nil
+    TriggerServerEvent('dg-handlingcontrol:server:delete', presetName)
+    cb('ok')
+end)
+
+-- Reset vehicle handling to game defaults (re-applies original model data)
+RegisterNUICallback('resetToDefault', function(_, cb)
+    local veh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if veh ~= 0 then
+        -- Force GTA to reload model's default handling by toggling a native
+        local model = GetEntityModel(veh)
+        local coords = GetEntityCoords(veh)
+        local heading = GetEntityHeading(veh)
+        -- Fastest approach: just set all fields back by requesting from original model
+        -- We do this by creating a temp vehicle, reading, applying, then deleting
+        local tempVeh = CreateVehicle(model, coords.x + 100, coords.y + 100, coords.z, heading, false, true)
+        if DoesEntityExist(tempVeh) then
+            local defaults = readAllFields(tempVeh)
+            DeleteVehicle(tempVeh)
+            applyHandling(veh, defaults)
+            cb(defaults)
+        else
+            cb({})
+        end
+    else
+        cb({})
+    end
+end)
+
+-- Close NUI
+RegisterNUICallback('close', function(_, cb)
+    closeEditor()
+    cb('ok')
+end)
+
+-- ─── Server → Client: receive saved data on resource start ───────────────────
+RegisterNetEvent('dg-handlingcontrol:client:loadSaved')
+AddEventHandler('dg-handlingcontrol:client:loadSaved', function(data)
+    savedData = data or {}
+end)
+
+-- Request saved data when we connect / resource starts
+AddEventHandler('onClientResourceStart', function(resourceName)
+    if resourceName == GetCurrentResourceName() then
+        TriggerServerEvent('dg-handlingcontrol:server:requestSaved')
+    end
+end)
+
+-- Also request on initial spawn
+CreateThread(function()
+    Wait(3000)
+    TriggerServerEvent('dg-handlingcontrol:server:requestSaved')
+end)

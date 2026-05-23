@@ -1,0 +1,9 @@
+# Saved preset data — contains server-specific tuning; don't commit
+data/saved_handlings.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/

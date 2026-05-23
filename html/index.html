@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DG Handling Control</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Hover Tooltip ─────────────────────────────────────────────────────────── -->
+<div id="hc-tooltip" class="hidden">
+    <div id="hc-tooltip-label"></div>
+    <div id="hc-tooltip-desc"></div>
+    <div id="hc-tooltip-tip"></div>
+</div>
+
+<div id="hc-overlay" class="hidden">
+
+    <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
+    <div id="hc-panel">
+        <div id="hc-header">
+            <div class="hc-logo">
+                <span class="hc-logo-icon">⚙</span>
+                <div>
+                    <div class="hc-title">HANDLING CONTROL</div>
+                    <div class="hc-subtitle" id="hc-vehicle-name">NO VEHICLE</div>
+                </div>
+            </div>
+            <div class="hc-header-actions">
+                <button class="hc-btn hc-btn-blue"  id="btn-guide">📋 GUIDE</button>
+                <button class="hc-btn hc-btn-green" id="btn-read-live">↻ REFRESH</button>
+                <button class="hc-btn hc-btn-amber" id="btn-reset-default">⟲ DEFAULTS</button>
+                <button class="hc-btn hc-btn-red"   id="btn-close">✕ CLOSE</button>
+            </div>
+        </div>
+
+        <!-- ── TOOLBAR ──────────────────────────────────────────────────────── -->
+        <div id="hc-toolbar">
+            <div id="hc-tabs"></div>
+            <div id="hc-preset-bar">
+                <select id="preset-select" title="Load a saved preset">
+                    <option value="">— Load Preset —</option>
+                </select>
+                <input type="text" id="preset-name-input" placeholder="Preset name…" maxlength="48" spellcheck="false" autocomplete="off">
+                <button class="hc-btn hc-btn-green" id="btn-save-preset">💾 SAVE</button>
+                <button class="hc-btn hc-btn-red"   id="btn-delete-preset">🗑 DELETE</button>
+            </div>
+        </div>
+
+        <!-- ── MAIN LAYOUT: FIELDS + GUIDE PANEL ───────────────────────────── -->
+        <div id="hc-layout">
+
+            <!-- Fields -->
+            <div id="hc-body">
+                <div id="hc-fields"></div>
+            </div>
+
+            <!-- Step-by-step Guide Panel (hidden by default) -->
+            <div id="hc-guide" class="hidden">
+                <div id="guide-header">
+                    <span id="guide-step-badge">STEP 1 / 8</span>
+                    <span id="guide-title">Engine Basics</span>
+                </div>
+                <div id="guide-body">
+                    <div id="guide-goal"></div>
+                    <div id="guide-instructions"></div>
+                    <div id="guide-fields-list"></div>
+                </div>
+                <div id="guide-footer">
+                    <button class="hc-btn" id="btn-guide-prev">◀ PREV</button>
+                    <div id="guide-dots"></div>
+                    <button class="hc-btn hc-btn-green" id="btn-guide-next">NEXT ▶</button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ── FOOTER ───────────────────────────────────────────────────────── -->
+        <div id="hc-footer">
+            <span id="hc-status">Ready. Hover a field for details.</span>
+            <div class="hc-footer-actions">
+                <label class="hc-toggle-wrap">
+                    <input type="checkbox" id="toggle-live" checked>
+                    <span class="hc-toggle-label">Live Preview</span>
+                </label>
+                <button class="hc-btn hc-btn-green large" id="btn-apply-all">▶ APPLY ALL</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
