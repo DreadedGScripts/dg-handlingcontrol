@@ -7,6 +7,31 @@ local savedData   = {}   -- [modelHash] = handling table, loaded from server
 local currentVeh  = 0
 local reapplyThread = nil
 
+local VEHICLE_CLASS_NAMES = {
+    [0] = 'Compacts',
+    [1] = 'Sedans',
+    [2] = 'SUVs',
+    [3] = 'Coupes',
+    [4] = 'Muscle',
+    [5] = 'Sports Classics',
+    [6] = 'Sports',
+    [7] = 'Super',
+    [8] = 'Motorcycles',
+    [9] = 'Off-Road',
+    [10] = 'Industrial',
+    [11] = 'Utility',
+    [12] = 'Vans',
+    [13] = 'Cycles',
+    [14] = 'Boats',
+    [15] = 'Helicopters',
+    [16] = 'Planes',
+    [17] = 'Service',
+    [18] = 'Emergency',
+    [19] = 'Military',
+    [20] = 'Commercial',
+    [21] = 'Trains',
+}
+
 -- ─── Handling field definitions ───────────────────────────────────────────────
 -- Each entry: { key, getter, setter, min, max, step, label, cat, desc, tip }
 local HANDLING_FIELDS = {
@@ -294,6 +319,14 @@ local function getModelName(veh)
     return string.lower(GetLabelText(GetDisplayNameFromVehicleModel(GetEntityModel(veh))))
 end
 
+local function getVehicleClassInfo(veh)
+    local classId = GetVehicleClass(veh)
+    return {
+        id = classId,
+        name = VEHICLE_CLASS_NAMES[classId] or ('Class ' .. tostring(classId)),
+    }
+end
+
 local function readAllFields(veh)
     local out = {}
     for _, f in ipairs(HANDLING_FIELDS) do
@@ -364,12 +397,14 @@ local function openEditor()
         local modelKey = tostring(model)
         local current  = readAllFields(veh)
         local displayName = GetDisplayNameFromVehicleModel(model)
+        local vehicleClass = getVehicleClassInfo(veh)
         SendNUIMessage({
             type      = 'open',
             fields    = HANDLING_FIELDS,
             current   = current,
             modelName = displayName,
             modelKey  = modelKey,
+            vehicleClass = vehicleClass,
             savedMap  = savedData,
         })
     end

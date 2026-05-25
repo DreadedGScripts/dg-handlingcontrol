@@ -19,16 +19,21 @@
 
     <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
     <div id="hc-panel">
+        <div id="hc-watermark" aria-hidden="true">DG-SCRIPTS</div>
         <div id="hc-header">
             <div class="hc-logo">
                 <span class="hc-logo-icon">⚙</span>
                 <div>
                     <div class="hc-title">HANDLING CONTROL</div>
                     <div class="hc-subtitle" id="hc-vehicle-name">NO VEHICLE</div>
+                    <div class="hc-subtitle hc-class-hint" id="hc-class-hint">CLASS HINT: NONE</div>
                 </div>
             </div>
             <div class="hc-header-actions">
+                <button class="hc-btn" id="btn-undo" title="Undo last change">↶ UNDO</button>
+                <button class="hc-btn" id="btn-redo" title="Redo last undone change">↷ REDO</button>
                 <button class="hc-btn hc-btn-blue"  id="btn-guide">📋 GUIDE</button>
+                <button class="hc-btn hc-btn-blue"  id="btn-diff">⇆ DIFF</button>
                 <button class="hc-btn hc-btn-green" id="btn-read-live">↻ REFRESH</button>
                 <button class="hc-btn hc-btn-amber" id="btn-reset-default">⟲ DEFAULTS</button>
                 <button class="hc-btn hc-btn-red"   id="btn-close">✕ CLOSE</button>
@@ -39,11 +44,15 @@
         <div id="hc-toolbar">
             <div id="hc-tabs"></div>
             <div id="hc-preset-bar">
+                <input type="text" id="field-filter-input" placeholder="Filter fields…" maxlength="48" spellcheck="false" autocomplete="off">
                 <select id="preset-select" title="Load a saved preset">
                     <option value="">— Load Preset —</option>
                 </select>
                 <input type="text" id="preset-name-input" placeholder="Preset name…" maxlength="48" spellcheck="false" autocomplete="off">
                 <button class="hc-btn hc-btn-green" id="btn-save-preset">💾 SAVE</button>
+                <button class="hc-btn hc-btn-blue" id="btn-export-xml">XML</button>
+                <button class="hc-btn" id="btn-export-preset">EXPORT</button>
+                <button class="hc-btn" id="btn-import-preset">IMPORT</button>
                 <button class="hc-btn hc-btn-red"   id="btn-delete-preset">🗑 DELETE</button>
             </div>
         </div>
@@ -53,7 +62,27 @@
 
             <!-- Fields -->
             <div id="hc-body">
+                <div id="hc-body-header">
+                    <div id="hc-body-category">CATEGORY</div>
+                    <button class="hc-btn hc-btn-blue small" id="btn-toggle-category">COLLAPSE</button>
+                </div>
                 <div id="hc-fields"></div>
+                <div id="hc-category-empty" class="hidden">This category is collapsed.</div>
+            </div>
+
+            <!-- Side-by-side Diff Panel -->
+            <div id="hc-diff" class="hidden">
+                <div id="diff-header">
+                    <div>
+                        <div id="diff-badge">DIFF VIEW</div>
+                        <div id="diff-title">Current vs selected preset</div>
+                    </div>
+                    <button class="hc-btn hc-btn-red small" id="btn-diff-close">✕</button>
+                </div>
+                <div id="diff-body">
+                    <div id="diff-summary"></div>
+                    <div id="diff-list"></div>
+                </div>
             </div>
 
             <!-- Step-by-step Guide Panel (hidden by default) -->
@@ -89,6 +118,25 @@
         </div>
     </div>
 
+</div>
+
+<!-- ── Modal for Import/Export ─────────────────────────────────────────────── -->
+<div id="hc-modal-backdrop" class="hidden">
+    <div id="hc-modal">
+        <div id="hc-modal-header">
+            <div>
+                <div id="hc-modal-title">Preset Import / Export</div>
+                <div id="hc-modal-subtitle">Paste JSON or Base64 data, or copy the exported payload below.</div>
+            </div>
+            <button class="hc-btn hc-btn-red small" id="btn-modal-close">✕</button>
+        </div>
+        <textarea id="hc-modal-textarea" spellcheck="false" autocomplete="off" placeholder="Paste preset data here..."></textarea>
+        <div id="hc-modal-actions">
+            <button class="hc-btn" id="btn-modal-copy">COPY</button>
+            <button class="hc-btn hc-btn-blue" id="btn-modal-download">DOWNLOAD</button>
+            <button class="hc-btn hc-btn-green" id="btn-modal-submit">IMPORT</button>
+        </div>
+    </div>
 </div>
 
 <script src="app.js"></script>

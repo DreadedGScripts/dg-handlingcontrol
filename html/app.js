@@ -6,26 +6,163 @@ let current     = {};
 let original    = {};
 let modelKey    = '';
 let modelName   = '';
+let vehicleClass = null;
 let savedModels = {};
 let activeTab   = '';
+let fieldFilter = '';
+let undoStack   = [];
+let redoStack   = [];
+let collapsedCategories = {};
+let lockedFields = {};
+let diffOpen   = false;
 let livePreview = true;
 let guideOpen   = false;
 let guideStep   = 0;
+
+const BUILTIN_PRESETS = [
+    {
+        id: 'race',
+        label: 'Race',
+        description: 'Track-biased setup with stable aero, strong grip, and clean response.',
+        handling: {
+            fMass: 1280,
+            fInitialDriveForce: 0.31,
+            fInitialDriveMaxFlatVel: 235,
+            fDriveInertia: 1.0,
+            fBrakeForce: 1.28,
+            fBrakeBiasFront: 0.64,
+            fSteeringLock: 36,
+            fTractionCurveMax: 2.95,
+            fTractionCurveMin: 2.6,
+            fTractionCurveLateral: 25,
+            fTractionLossMult: 0.82,
+            fSuspensionForce: 7.1,
+            fSuspensionCompDamp: 2.0,
+            fSuspensionReboundDamp: 2.35,
+            fAntiRollBarForce: 1.25,
+            fAntiRollBarBiasFront: 0.53,
+            fSuspensionRaise: -0.02,
+        },
+    },
+    {
+        id: 'drift',
+        label: 'Drift',
+        description: 'Loose rear grip, more steering angle, and aggressive rotation.',
+        handling: {
+            fMass: 1220,
+            fInitialDriveForce: 0.39,
+            fInitialDriveMaxFlatVel: 215,
+            fDriveBiasFront: 0.0,
+            fDriveInertia: 0.8,
+            fBrakeForce: 1.08,
+            fBrakeBiasFront: 0.58,
+            fSteeringLock: 62,
+            fTractionCurveMax: 2.0,
+            fTractionCurveMin: 1.25,
+            fTractionCurveLateral: 40,
+            fTractionLossMult: 1.55,
+            fLowSpeedTractionLossMult: 0.35,
+            fSuspensionForce: 4.8,
+            fSuspensionCompDamp: 1.65,
+            fSuspensionReboundDamp: 1.9,
+            fAntiRollBarForce: 0.95,
+            fAntiRollBarBiasFront: 0.4,
+            fSuspensionRaise: -0.03,
+        },
+    },
+    {
+        id: 'offroad',
+        label: 'Off-Road',
+        description: 'Soft travel, stable grip, and predictable behavior over rough terrain.',
+        handling: {
+            fMass: 2250,
+            fInitialDriveForce: 0.24,
+            fInitialDriveMaxFlatVel: 170,
+            fDriveBiasFront: 0.45,
+            fBrakeForce: 0.98,
+            fBrakeBiasFront: 0.62,
+            fSteeringLock: 40,
+            fTractionCurveMax: 2.45,
+            fTractionCurveMin: 2.15,
+            fTractionCurveLateral: 28,
+            fLowSpeedTractionLossMult: 0.25,
+            fTractionLossMult: 0.9,
+            fSuspensionForce: 2.8,
+            fSuspensionCompDamp: 1.35,
+            fSuspensionReboundDamp: 1.7,
+            fSuspensionUpperLimit: 0.28,
+            fSuspensionLowerLimit: -0.32,
+            fSuspensionRaise: 0.26,
+            fAntiRollBarForce: 0.45,
+            fAntiRollBarBiasFront: 0.5,
+        },
+    },
+    {
+        id: 'daily',
+        label: 'Daily',
+        description: 'Comfortable street tune with mild stability and safe manners.',
+        handling: {
+            fMass: 1550,
+            fInitialDriveForce: 0.22,
+            fInitialDriveMaxFlatVel: 185,
+            fDriveBiasFront: 0.5,
+            fBrakeForce: 0.96,
+            fBrakeBiasFront: 0.61,
+            fSteeringLock: 36,
+            fTractionCurveMax: 2.6,
+            fTractionCurveMin: 2.3,
+            fTractionCurveLateral: 27,
+            fTractionLossMult: 1.0,
+            fSuspensionForce: 4.2,
+            fSuspensionCompDamp: 1.7,
+            fSuspensionReboundDamp: 1.9,
+            fAntiRollBarForce: 0.8,
+            fAntiRollBarBiasFront: 0.5,
+            fSuspensionRaise: 0,
+        },
+    },
+];
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
 const overlay      = document.getElementById('hc-overlay');
 const vehicleName  = document.getElementById('hc-vehicle-name');
 const tabBar       = document.getElementById('hc-tabs');
 const fieldsEl     = document.getElementById('hc-fields');
+const categoryEmpty = document.getElementById('hc-category-empty');
+const bodyCategory  = document.getElementById('hc-body-category');
+const classBadge    = document.getElementById('hc-vehicle-name');
 const statusEl     = document.getElementById('hc-status');
+const btnUndo      = document.getElementById('btn-undo');
+const btnRedo      = document.getElementById('btn-redo');
+const btnToggleCategory = document.getElementById('btn-toggle-category');
+const btnDiff      = document.getElementById('btn-diff');
+const btnDiffClose = document.getElementById('btn-diff-close');
+const btnExportXml = document.getElementById('btn-export-xml');
+const btnExportPreset = document.getElementById('btn-export-preset');
+const btnImportPreset = document.getElementById('btn-import-preset');
 const presetSelect     = document.getElementById('preset-select');
  const presetNameInput  = document.getElementById('preset-name-input');
+const fieldFilterInput  = document.getElementById('field-filter-input');
 const toggleLive       = document.getElementById('toggle-live');
 const tooltip      = document.getElementById('hc-tooltip');
 const tooltipLabel = document.getElementById('hc-tooltip-label');
 const tooltipDesc  = document.getElementById('hc-tooltip-desc');
 const tooltipTip   = document.getElementById('hc-tooltip-tip');
+const diffPanel    = document.getElementById('hc-diff');
+const diffSummary  = document.getElementById('diff-summary');
+const diffList     = document.getElementById('diff-list');
 const guidePanel   = document.getElementById('hc-guide');
+const classHintEl  = document.getElementById('hc-class-hint');
+const modalBackdrop = document.getElementById('hc-modal-backdrop');
+const modalTitle    = document.getElementById('hc-modal-title');
+const modalSubtitle = document.getElementById('hc-modal-subtitle');
+const modalTextarea = document.getElementById('hc-modal-textarea');
+const modalCopyBtn  = document.getElementById('btn-modal-copy');
+const modalDownloadBtn = document.getElementById('btn-modal-download');
+const modalSubmitBtn = document.getElementById('btn-modal-submit');
+const modalCloseBtn = document.getElementById('btn-modal-close');
+
+let modalMode = '';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 function setStatus(msg, type = '') {
@@ -40,6 +177,398 @@ function round(v, step) {
 }
 
 function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+
+function cloneHandling(data) {
+    return JSON.parse(JSON.stringify(data || {}));
+}
+
+function updateHistoryButtons() {
+    btnUndo.disabled = undoStack.length <= 1;
+    btnRedo.disabled = redoStack.length === 0;
+}
+
+function isBuiltinPresetValue(value) {
+    return typeof value === 'string' && value.startsWith('builtin:');
+}
+
+function getBuiltinPreset(value) {
+    const id = String(value || '').replace(/^builtin:/, '');
+    return BUILTIN_PRESETS.find(preset => preset.id === id) || null;
+}
+
+function getPresetLabel(value) {
+    const preset = getBuiltinPreset(value);
+    return preset ? `Baseline: ${preset.label}` : String(value || '');
+}
+
+function updateCategoryHeader() {
+    const collapsed = !!collapsedCategories[activeTab];
+    bodyCategory.textContent = activeTab ? `CATEGORY: ${activeTab}` : 'CATEGORY';
+    btnToggleCategory.textContent = collapsed ? 'EXPAND' : 'COLLAPSE';
+    btnToggleCategory.disabled = !activeTab;
+}
+
+function updateVehicleClassDisplay() {
+    const name = vehicleClass && vehicleClass.name ? vehicleClass.name : 'UNKNOWN CLASS';
+    const id = vehicleClass && vehicleClass.id !== undefined ? vehicleClass.id : '';
+    const classText = id === '' ? name : `${name} [${id}]`;
+    classBadge.textContent = modelName + (modelKey ? ` [${modelKey}]` : '') + ` • ${classText}`;
+    classHintEl.textContent = `CLASS HINT: ${getSuggestedFocus(vehicleClass && vehicleClass.id)}`;
+}
+
+function getSuggestedFocus(classId) {
+    if (classId === undefined || classId === null) return 'None';
+    switch (classId) {
+        case 0: return 'Balanced Street / Suspension';
+        case 1: return 'Sedan Grip / Brakes';
+        case 2: return 'SUV Stability / Suspension';
+        case 3: return 'Coupes / Engine & Steering';
+        case 4: return 'Muscle / Traction & Drivetrain';
+        case 5: return 'Classic Grip / Brakes';
+        case 6: return 'Sports / Engine & Traction';
+        case 7: return 'Super / Aerodynamics & Grip';
+        case 8: return 'Bike / Steering & Balance';
+        case 9: return 'Off-Road / Suspension';
+        case 10: return 'Industrial / Durability';
+        case 11: return 'Utility / Suspension';
+        case 12: return 'Van / Stability';
+        case 13: return 'Cycle / Minimal Tuning';
+        case 14: return 'Boat / N/A';
+        case 15: return 'Helicopter / N/A';
+        case 16: return 'Plane / N/A';
+        case 17: return 'Service / Stability';
+        case 18: return 'Emergency / Brakes';
+        case 19: return 'Military / Durability';
+        case 20: return 'Commercial / Stability';
+        case 21: return 'Train / N/A';
+        default: return 'General Tuning';
+    }
+}
+
+function updateDiffToggle() {
+    btnDiff.textContent = diffOpen ? '⇆ DIFF ON' : '⇆ DIFF';
+}
+
+function updateLockStateFromMessage(data) {
+    if (data && data.lockedFields && typeof data.lockedFields === 'object') {
+        lockedFields = { ...data.lockedFields };
+    }
+}
+
+function isFieldLocked(key) {
+    return !!lockedFields[key];
+}
+
+function updateLockButton(button, key) {
+    const locked = isFieldLocked(key);
+    button.classList.toggle('active', locked);
+    button.textContent = locked ? '🔒' : '🔓';
+    button.title = locked ? 'Unlock this field' : 'Lock this field';
+}
+
+function mergeHandlingWithLocks(base, next) {
+    const result = cloneHandling(base);
+    for (const f of fields) {
+        if (isFieldLocked(f.key)) continue;
+        if (next[f.key] !== undefined) result[f.key] = next[f.key];
+    }
+    return result;
+}
+
+function getComparisonSource() {
+    const selected = presetSelect.value;
+    if (selected) {
+        if (isBuiltinPresetValue(selected)) {
+            const preset = getBuiltinPreset(selected);
+            if (preset) return { label: `Baseline: ${preset.label}`, handling: preset.handling };
+        } else if (savedModels[selected]) {
+            return { label: selected, handling: savedModels[selected] };
+        }
+    }
+    return { label: 'Stock / original', handling: original };
+}
+
+function renderDiffPanel() {
+    if (!diffOpen) return;
+
+    const source = getComparisonSource();
+    const compare = source.handling || {};
+    const total = fields.length;
+    let changed = 0;
+
+    diffSummary.textContent = `Comparing current values against ${source.label}. Fields with differences are highlighted.`;
+    diffList.innerHTML = '';
+
+    if (!fields.length) {
+        diffList.innerHTML = '<div class="diff-empty">No fields available to compare.</div>';
+        return;
+    }
+
+    for (const f of fields) {
+        const currentValue = current[f.key];
+        const compareValue = compare[f.key];
+        const currentText = currentValue === undefined ? '—' : String(currentValue);
+        const compareText = compareValue === undefined ? '—' : String(compareValue);
+        const mismatch = currentValue !== compareValue;
+        if (mismatch) changed++;
+
+        const row = document.createElement('div');
+        row.className = 'diff-row' + (mismatch ? ' changed' : '');
+        row.innerHTML = `
+            <div class="diff-row-header">
+                <div class="diff-row-label">${f.label}</div>
+                <div class="diff-row-cat">${f.cat}</div>
+            </div>
+            <div class="diff-values">
+                <div class="diff-value current ${mismatch ? 'mismatch' : ''}"><span>Current</span>${currentText}</div>
+                <div class="diff-value compare ${mismatch ? 'mismatch' : ''}"><span>${source.label}</span>${compareText}</div>
+            </div>
+        `;
+        diffList.appendChild(row);
+    }
+
+    diffSummary.textContent = `Comparing current values against ${source.label}. ${changed} of ${total} fields differ.`;
+}
+
+function setDiffOpen(nextState) {
+    diffOpen = !!nextState;
+    diffPanel.classList.toggle('hidden', !diffOpen);
+    updateDiffToggle();
+    renderDiffPanel();
+}
+
+function updateDeltaDisplay(deltaEl, value, originalValue, step) {
+    const decimals = Math.max(0, (String(step).split('.')[1] || '').length);
+    const delta = round((value ?? 0) - (originalValue ?? 0), step);
+    if (delta === 0) {
+        deltaEl.className = 'hc-field-delta clean';
+        deltaEl.textContent = 'No change';
+        return;
+    }
+    deltaEl.className = 'hc-field-delta dirty';
+    deltaEl.textContent = (delta > 0 ? '+' : '') + delta.toFixed(decimals);
+}
+
+function pushUndoSnapshot() {
+    const snapshot = cloneHandling(current);
+    const previous = undoStack[undoStack.length - 1];
+    if (previous && JSON.stringify(previous) === JSON.stringify(snapshot)) return;
+    undoStack.push(snapshot);
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack = [];
+    updateHistoryButtons();
+}
+
+function setCurrentHandling(next, options = {}) {
+    current = cloneHandling(next);
+    renderFields();
+    if (options.pushHistory !== false) pushUndoSnapshot();
+}
+
+function applyCurrentHandling(next, options = {}) {
+    setCurrentHandling(mergeHandlingWithLocks(current, next), options);
+    return nuiFetch('applyAll', { handling: current });
+}
+
+function undoChange() {
+    if (undoStack.length <= 1) return;
+    redoStack.push(cloneHandling(current));
+    undoStack.pop();
+    current = cloneHandling(undoStack[undoStack.length - 1]);
+    renderFields();
+    nuiFetch('applyAll', { handling: current });
+    updateHistoryButtons();
+    setStatus('Undo applied.', 'ok');
+}
+
+function redoChange() {
+    if (redoStack.length === 0) return;
+    const snapshot = redoStack.pop();
+    current = cloneHandling(snapshot);
+    undoStack.push(cloneHandling(snapshot));
+    renderFields();
+    nuiFetch('applyAll', { handling: current });
+    updateHistoryButtons();
+    setStatus('Redo applied.', 'ok');
+}
+
+function setCategoryCollapsed(cat, collapsed) {
+    if (!cat) return;
+    collapsedCategories[cat] = collapsed;
+    updateCategoryHeader();
+    renderFields();
+}
+
+function isCategoryCollapsed(cat) {
+    return !!collapsedCategories[cat];
+}
+
+function toBase64Utf8(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+}
+
+function fromBase64Utf8(text) {
+    const binary = atob(text);
+    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+}
+
+function setModalVisible(visible) {
+    modalBackdrop.classList.toggle('hidden', !visible);
+    if (visible) {
+        setTimeout(() => modalTextarea.focus(), 0);
+    }
+}
+
+function openExportModal(content, filename) {
+    modalMode = 'export';
+    modalTitle.textContent = 'Export Preset';
+    modalSubtitle.textContent = 'Copy the JSON or download it as a file.';
+    modalTextarea.value = content;
+    modalTextarea.placeholder = '';
+    modalSubmitBtn.textContent = 'CLOSE';
+    modalCopyBtn.classList.remove('hidden');
+    modalDownloadBtn.classList.remove('hidden');
+    modalCopyBtn.textContent = 'COPY';
+    modalDownloadBtn.textContent = 'DOWNLOAD';
+    modalTextarea.dataset.filename = filename || 'preset.json';
+    setModalVisible(true);
+}
+
+function openImportModal() {
+    modalMode = 'import';
+    modalTitle.textContent = 'Import Preset';
+    modalSubtitle.textContent = 'Paste JSON or Base64 data, then import it into the current vehicle.';
+    modalTextarea.value = '';
+    modalTextarea.placeholder = 'Paste preset JSON or Base64 data here...';
+    modalSubmitBtn.textContent = 'IMPORT';
+    modalCopyBtn.classList.add('hidden');
+    modalDownloadBtn.classList.add('hidden');
+    setModalVisible(true);
+}
+
+function closeModal() {
+    modalMode = '';
+    setModalVisible(false);
+}
+
+async function exportModalCopy() {
+    const ok = await copyText(modalTextarea.value);
+    setStatus(ok ? 'Copied export data to clipboard.' : 'Clipboard copy failed.', ok ? 'ok' : 'error');
+}
+
+function exportModalDownload() {
+    const filename = modalTextarea.dataset.filename || 'preset.json';
+    downloadText(filename, modalTextarea.value, 'application/json');
+    setStatus('Export downloaded.', 'ok');
+}
+
+function importModalSubmit() {
+    const blob = modalTextarea.value.trim();
+    if (!blob) {
+        setStatus('Paste preset data before importing.', 'error');
+        return;
+    }
+
+    let payload;
+    try {
+        payload = decodePresetBlob(blob);
+    } catch (err) {
+        setStatus('Invalid preset data.', 'error');
+        return;
+    }
+
+    const handling = extractHandlingPayload(payload);
+    if (!handling) {
+        setStatus('Preset data did not contain handling values.', 'error');
+        return;
+    }
+
+    const name = (payload && payload.presetName ? String(payload.presetName) : presetNameInput.value.trim() || modelName || 'Imported Preset').trim();
+    const saveModelKey = modelKey || (payload && payload.modelKey ? String(payload.modelKey) : '');
+
+    applyCurrentHandling(handling).then(async () => {
+        if (name) {
+            savedModels[name] = { _modelKey: saveModelKey, ...current };
+            presetNameInput.value = name;
+            refreshPresetDropdown();
+            presetSelect.value = name;
+            await nuiFetch('saveHandling', { presetName: name, modelKey: saveModelKey, handling: current });
+        }
+
+        setStatus(`Imported preset${name ? `: ${name}` : ''}.`, 'ok');
+        closeModal();
+    });
+}
+
+function escapeXml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
+function formatHandlingValue(value, step) {
+    const decimals = Math.max(0, (String(step).split('.')[1] || '').length);
+    const output = round(Number(value) || 0, step);
+    return decimals > 0 ? output.toFixed(decimals) : String(Math.round(output));
+}
+
+function buildHandlingMetaXml(name, handling) {
+    const handlingName = escapeXml(name || modelName || modelKey || 'CUSTOM_HANDLING');
+    const items = fields
+        .map(f => {
+            const value = handling[f.key];
+            if (value === undefined || value === null || Number.isNaN(Number(value))) return null;
+            return `    <${f.key} value="${escapeXml(formatHandlingValue(value, f.step))}" />`;
+        })
+        .filter(Boolean)
+        .join('\n');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<HandlingData>\n  <Item type="CHandlingData">\n    <handlingName>${handlingName}</handlingName>\n${items}\n  </Item>\n</HandlingData>\n`;
+}
+
+function downloadText(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType || 'text/plain' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+}
+
+async function copyText(content) {
+    try {
+        await navigator.clipboard.writeText(content);
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+function extractHandlingPayload(input) {
+    if (!input || typeof input !== 'object') return null;
+    if (input.handling && typeof input.handling === 'object') return input.handling;
+    const out = {};
+    for (const f of fields) {
+        if (input[f.key] !== undefined) out[f.key] = input[f.key];
+    }
+    return Object.keys(out).length > 0 ? out : null;
+}
+
+function decodePresetBlob(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    if (raw.startsWith('{') || raw.startsWith('[')) return JSON.parse(raw);
+    return JSON.parse(fromBase64Utf8(raw));
+}
 
 // ─── NUI communication ────────────────────────────────────────────────────────
 const RESOURCE_NAME = (typeof GetParentResourceName === 'function')
@@ -119,11 +648,26 @@ function switchTab(cat) {
 
 function renderFields() {
     fieldsEl.innerHTML = '';
-    const visible = fields.filter(f => f.cat === activeTab);
+    const needle = fieldFilter.trim().toLowerCase();
+    const visible = fields.filter(f => {
+        if (f.cat !== activeTab) return false;
+        if (!needle) return true;
+        return [f.key, f.label, f.cat, f.desc, f.tip].some(v => String(v || '').toLowerCase().includes(needle));
+    });
+    updateCategoryHeader();
+    if (isCategoryCollapsed(activeTab)) {
+        fieldsEl.classList.add('hidden');
+        categoryEmpty.classList.remove('hidden');
+        categoryEmpty.textContent = needle ? 'This category is collapsed.' : `The ${activeTab} category is collapsed.`;
+        return;
+    }
+    fieldsEl.classList.remove('hidden');
+    categoryEmpty.classList.add('hidden');
     for (const f of visible) {
         fieldsEl.appendChild(buildFieldCard(f));
     }
     if (guideOpen) applyGuideHighlights();
+    renderDiffPanel();
 }
 
 function buildFieldCard(f) {
@@ -142,7 +686,36 @@ function buildFieldCard(f) {
     const label = document.createElement('div');
     label.className = 'hc-field-label';
     label.textContent = f.label;
-    card.appendChild(label);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'hc-field-reset';
+    resetBtn.title = 'Reset this field to the original value';
+    resetBtn.textContent = '↺';
+
+    const lockBtn = document.createElement('button');
+    lockBtn.type = 'button';
+    lockBtn.className = 'hc-field-reset hc-field-lock';
+    updateLockButton(lockBtn, f.key);
+    lockBtn.addEventListener('click', () => {
+        lockedFields[f.key] = !isFieldLocked(f.key);
+        updateLockButton(lockBtn, f.key);
+        if (guideOpen) applyGuideHighlights();
+        renderDiffPanel();
+        setStatus(`${f.label} ${isFieldLocked(f.key) ? 'locked' : 'unlocked'}.`, 'ok');
+    });
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'hc-field-label-row';
+    labelRow.appendChild(label);
+    labelRow.appendChild(resetBtn);
+    labelRow.appendChild(lockBtn);
+    card.appendChild(labelRow);
+
+    const delta = document.createElement('div');
+    delta.className = 'hc-field-delta' + (val !== orig ? ' dirty' : ' clean');
+    updateDeltaDisplay(delta, val, orig, f.step);
+    card.appendChild(delta);
 
     const row = document.createElement('div');
     row.className = 'hc-field-row';
@@ -174,27 +747,33 @@ function buildFieldCard(f) {
     // Guard flag — prevents programmatic value assignments from re-firing events
     let syncing = false;
 
+    function setInputs(v) {
+        syncing = true;
+        slider.value = v;
+        num.value = v;
+        syncing = false;
+    }
+
     function syncFromSlider() {
         if (syncing) return;
-        syncing = true;
         const v = round(parseFloat(slider.value), f.step);
-        num.value = v;
+        setInputs(v);
         current[f.key] = v;
         updateDirty(f.key, card);
+        updateDeltaDisplay(delta, v, orig, f.step);
+        pushUndoSnapshot();
         if (livePreview) sendApplyField(f, v, isInt);
-        syncing = false;
     }
 
     function syncFromNum() {
         if (syncing) return;
-        syncing = true;
         let v = round(clamp(parseFloat(num.value) || 0, f.min, f.max), f.step);
-        num.value = v;
-        slider.value = v;
+        setInputs(v);
         current[f.key] = v;
         updateDirty(f.key, card);
+        updateDeltaDisplay(delta, v, orig, f.step);
+        pushUndoSnapshot();
         if (livePreview) sendApplyField(f, v, isInt);
-        syncing = false;
     }
 
     slider.addEventListener('input', syncFromSlider);
@@ -203,13 +782,22 @@ function buildFieldCard(f) {
     num.addEventListener('change', syncFromNum);
     num.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); syncFromNum(); } });
 
-    function setNumeric(v) {
-        syncing = true;
-        slider.value = v;
-        num.value = v;
-        syncing = false;
+    resetBtn.addEventListener('click', () => {
+        const v = orig;
+        setInputs(v);
         current[f.key] = v;
         updateDirty(f.key, card);
+        updateDeltaDisplay(delta, v, orig, f.step);
+        pushUndoSnapshot();
+        if (livePreview) sendApplyField(f, v, isInt);
+    });
+
+    function setNumeric(v) {
+        setInputs(v);
+        current[f.key] = v;
+        updateDirty(f.key, card);
+        updateDeltaDisplay(delta, v, orig, f.step);
+        pushUndoSnapshot();
         if (livePreview) sendApplyField(f, v, isInt);
     }
 
@@ -242,13 +830,28 @@ function updateDirty(key, card) {
 // ─── Preset dropdown ──────────────────────────────────────────────────────────
 function refreshPresetDropdown() {
     presetSelect.innerHTML = '<option value="">— Load Preset —</option>';
+
+    const baselineGroup = document.createElement('optgroup');
+    baselineGroup.label = 'Built-in Baselines';
+    for (const preset of BUILTIN_PRESETS) {
+        const opt = document.createElement('option');
+        opt.value = `builtin:${preset.id}`;
+        opt.textContent = `Baseline: ${preset.label}`;
+        opt.title = preset.description;
+        baselineGroup.appendChild(opt);
+    }
+    presetSelect.appendChild(baselineGroup);
+
+    const savedGroup = document.createElement('optgroup');
+    savedGroup.label = 'Saved Presets';
     for (const [key, data] of Object.entries(savedModels)) {
         const opt = document.createElement('option');
         opt.value = key;
         const isThisModel = data && data._modelKey === modelKey;
         opt.textContent = key + (isThisModel ? ' ★' : '');
-        presetSelect.appendChild(opt);
+        savedGroup.appendChild(opt);
     }
+    presetSelect.appendChild(savedGroup);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -361,6 +964,7 @@ function renderGuideStep() {
 
     // Switch to the step's category tab
     if (step.cat !== activeTab) switchTab(step.cat);
+    if (isCategoryCollapsed(step.cat)) setCategoryCollapsed(step.cat, false);
     else { renderFields(); applyGuideHighlights(); }
 
     setStatus(`Guide Step ${guideStep + 1}/${GUIDE_STEPS.length}: ${step.title} — highlighted fields are your focus.`, '');
@@ -407,6 +1011,75 @@ document.getElementById('btn-guide-prev').addEventListener('click', () => {
     if (guideStep > 0) { guideStep--; renderGuideStep(); }
 });
 
+btnDiff.addEventListener('click', () => {
+    setDiffOpen(!diffOpen);
+});
+
+btnDiffClose.addEventListener('click', () => {
+    setDiffOpen(false);
+});
+
+btnUndo.addEventListener('click', undoChange);
+btnRedo.addEventListener('click', redoChange);
+btnToggleCategory.addEventListener('click', () => {
+    if (!activeTab) return;
+    setCategoryCollapsed(activeTab, !isCategoryCollapsed(activeTab));
+});
+
+btnExportXml.addEventListener('click', async () => {
+    if (!current || Object.keys(current).length === 0) {
+        setStatus('Nothing to export yet.', 'error');
+        return;
+    }
+    const exportName = presetNameInput.value.trim() || modelName || modelKey || 'HANDLING';
+    const xml = buildHandlingMetaXml(exportName, current);
+    await copyText(xml);
+    downloadText(`handling-${(exportName || 'custom').replace(/[^a-z0-9_-]+/gi, '_')}.meta.xml`, xml, 'application/xml');
+    setStatus('handling.meta XML copied and downloaded.', 'ok');
+});
+
+btnExportPreset.addEventListener('click', async () => {
+    if (!current || Object.keys(current).length === 0) {
+        setStatus('Nothing to export yet.', 'error');
+        return;
+    }
+    const payload = {
+        version: 1,
+        presetName: presetNameInput.value.trim() || modelName || 'Custom Preset',
+        modelKey: modelKey || '',
+        modelName: modelName || '',
+        handling: cloneHandling(current),
+    };
+    const json = JSON.stringify(payload, null, 2);
+    openExportModal(json, `${(payload.presetName || 'preset').replace(/[^a-z0-9_-]+/gi, '_')}.json`);
+    setStatus('Export ready. Copy or download from the modal.', 'ok');
+});
+
+btnImportPreset.addEventListener('click', async () => {
+    openImportModal();
+    setStatus('Paste preset data in the modal, then import it.', 'ok');
+});
+
+fieldFilterInput.addEventListener('input', () => {
+    fieldFilter = fieldFilterInput.value || '';
+    renderFields();
+});
+
+modalCloseBtn.addEventListener('click', closeModal);
+modalCopyBtn.addEventListener('click', exportModalCopy);
+modalDownloadBtn.addEventListener('click', exportModalDownload);
+modalSubmitBtn.addEventListener('click', () => {
+    if (modalMode === 'export') {
+        closeModal();
+        return;
+    }
+    importModalSubmit();
+});
+
+modalBackdrop.addEventListener('click', e => {
+    if (e.target === modalBackdrop) closeModal();
+});
+
 // ─── Button handlers ──────────────────────────────────────────────────────────
 function doClose() {
     overlay.classList.add('hidden');
@@ -420,8 +1093,9 @@ document.getElementById('btn-read-live').addEventListener('click', async () => {
     setStatus('Reading live values…', 'warn');
     const live = await nuiFetch('readFields');
     if (live && Object.keys(live).length > 0) {
-        current = live;
+        current = mergeHandlingWithLocks(current, live);
         renderFields();
+        pushUndoSnapshot();
         setStatus('Live values refreshed.', 'ok');
     } else {
         setStatus('Not in a vehicle.', 'error');
@@ -432,8 +1106,9 @@ document.getElementById('btn-reset-default').addEventListener('click', async () 
     setStatus('Resetting to defaults…', 'warn');
     const defaults = await nuiFetch('resetToDefault');
     if (defaults && Object.keys(defaults).length > 0) {
-        current = defaults;
+        current = mergeHandlingWithLocks(current, defaults);
         renderFields();
+        pushUndoSnapshot();
         setStatus('Handling reset to GTA defaults.', 'ok');
     } else {
         setStatus('Not in a vehicle — cannot reset.', 'error');
@@ -461,6 +1136,7 @@ document.getElementById('btn-save-preset').addEventListener('click', async () =>
 
 document.getElementById('btn-delete-preset').addEventListener('click', async () => {
     const key = presetSelect.value;
+    if (isBuiltinPresetValue(key)) { setStatus('Built-in baselines cannot be deleted.', 'error'); return; }
     if (!key) { setStatus('Select a preset to delete.', 'error'); return; }
     delete savedModels[key];
     await nuiFetch('deleteHandling', { modelKey: key });
@@ -471,15 +1147,18 @@ document.getElementById('btn-delete-preset').addEventListener('click', async () 
 presetSelect.addEventListener('change', async () => {
     const key = presetSelect.value;
     // Populate the name input with the selected preset's name
-    if (key) presetNameInput.value = key;
-    if (!key || !savedModels[key]) return;
-    const entry = savedModels[key];
-    for (const f of fields) {
-        if (entry[f.key] !== undefined) current[f.key] = entry[f.key];
-    }
+    if (key && !isBuiltinPresetValue(key)) presetNameInput.value = key;
+    if (!key) return;
+
+    const builtin = getBuiltinPreset(key);
+    const entry = builtin ? builtin.handling : savedModels[key];
+    if (!entry) return;
+
+    current = mergeHandlingWithLocks(current, entry);
     renderFields();
+    pushUndoSnapshot();
     await nuiFetch('applyAll', { handling: current });
-    setStatus(`Preset loaded & applied: ${key}.`, 'ok');
+    setStatus(`${builtin ? 'Baseline' : 'Preset'} loaded & applied: ${builtin ? builtin.label : key}.`, 'ok');
 });
 
 toggleLive.addEventListener('change', () => {
@@ -498,21 +1177,33 @@ window.addEventListener('message', function(e) {
             original    = { ...current };
             modelKey    = d.modelKey  || '';
             modelName   = d.modelName || 'UNKNOWN';
+            vehicleClass = d.vehicleClass || null;
             savedModels = {};
+            collapsedCategories = {};
+            lockedFields = {};
 
             if (d.savedMap) savedModels = d.savedMap;
 
             activeTab = fields.length > 0 ? fields[0].cat : '';
             guideOpen = false;
             guidePanel.classList.add('hidden');
+            diffOpen = false;
+            diffPanel.classList.add('hidden');
+            undoStack = [cloneHandling(current)];
+            redoStack = [];
+            fieldFilter = '';
+            fieldFilterInput.value = '';
 
             // Pre-fill name input with a sensible default for this vehicle
             presetNameInput.value = modelName + (modelKey ? ' [' + modelKey + ']' : '');
 
-            vehicleName.textContent = modelName + (modelKey ? ` [${modelKey}]` : '');
+            updateVehicleClassDisplay();
             overlay.classList.remove('hidden');
             buildUI();
             refreshPresetDropdown();
+            updateHistoryButtons();
+            updateCategoryHeader();
+            updateDiffToggle();
             setStatus('Ready. Hover any field for a detailed description. Use 📋 GUIDE for step-by-step tuning.', '');
             break;
         }
