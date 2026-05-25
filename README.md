@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Framework](https://img.shields.io/badge/framework-Standalone-brightgreen.svg)
 
-**Live-preview handling editor with tooltips, preset saving, and a step-by-step tuning guide — no framework required**
+**Live-preview handling editor with guided tuning, smart presets, locking, diffing, and class-aware hints — no framework required**
 
 [Overview](#-overview) • [Features](#-features) • [Installation](#-installation) • [Configuration](#%EF%B8%8F-configuration) • [Events](#-events) • [Ecosystem](#-dg-ecosystem)
 
@@ -22,6 +22,8 @@
 
 A built-in **step-by-step tuning guide** walks through all 8 tuning phases in order, highlights the relevant fields on-screen, and explains exactly what each setting does and how it affects the car. Every field also shows a detailed hover **tooltip** with a full description and a quick ↑/↓ effect summary.
 
+The latest update adds a complete quality-of-life workflow: searchable fields, per-field reset and lock controls, undo/redo history, side-by-side diff view, built-in baseline presets (Race, Drift, Off-Road, Daily), non-blocking import/export modal tools, and class-aware tuning hints shown in the header.
+
 | Property | Value |
 |----------|-------|
 | **Resource Name** | `dg-handlingcontrol` |
@@ -30,7 +32,7 @@ A built-in **step-by-step tuning guide** walks through all 8 tuning phases in or
 | **Framework Support** | **100% Standalone** — no QBCore, ESX, Qbox, or ox required |
 | **Persistence** | JSON file saved to `data/saved_handlings.json` |
 | **Permissions** | FiveM native ace permissions |
-| **NUI** | Full-screen dark-theme panel — no CEF dependency |
+| **NUI** | Full-screen dark-theme panel (FiveM NUI / CEF) |
 
 ---
 
@@ -51,7 +53,15 @@ A built-in **step-by-step tuning guide** walks through all 8 tuning phases in or
 - **Hover tooltips** — every field shows a full plain-English description + ↑/↓ effect summary on mouse-over
 - **Guide highlights** — wizard automatically switches tabs and glows the relevant fields blue with a pulsing animation
 - **Clickable field references** in the guide jump directly to the relevant card
+- **Search/filter bar** — quickly find fields by name, key, category, description, or tip text
+- **Per-field reset + delta** — reset one field to original and instantly see how far each value is from stock
+- **Field locking** — lock specific fields so preset loads/imports/resets/refreshes do not overwrite them
+- **Undo / Redo history** — walk backward and forward through tuning changes in-session
+- **Side-by-side diff view** — compare current tuning against selected preset (or stock/original when none selected)
 - **Preset system** — save named handling presets per vehicle model, load and delete from a dropdown
+- **Built-in baseline presets** — one-click starter tunes for Race, Drift, Off-Road, and Daily
+- **Import / Export modal** — non-blocking JSON/Base64 workflow for sharing presets (plus XML export for handling.meta)
+- **Vehicle class auto-detect** — class label + class-aware tuning focus hint shown in header
 - **Auto-apply on enter** — saved presets are silently re-applied whenever any player enters that vehicle model (GTA resets handling on stream events)
 - **Permission system** — ace-permission gated; toggle `Config.RequirePermission` for open access or locked-down admin-only use
 - **Ace deny logging** — server logs permission denials with player name to console
@@ -117,10 +127,23 @@ add_ace group.admin dg-handlingcontrol.use allow
 2. Type `/handlingeditor` in chat (or your configured command)
 3. The panel opens showing all live handling values for that vehicle
 4. Use the **📋 GUIDE** button for a step-by-step walk-through
-5. Adjust fields using sliders, number inputs, or the **−/+** step buttons
-6. Hover any field for a detailed tooltip explaining what it does
-7. Click **💾 SAVE** to persist the preset — it will auto-apply server-wide from then on
-8. Press **Escape** or click **✕ CLOSE** to exit
+5. Use the search bar to jump to the exact field you want
+6. Adjust fields using sliders, number inputs, or the **−/+** step buttons
+7. Lock fields you want preserved with the lock icon on each card
+8. Use **↶ UNDO / ↷ REDO** while tuning to quickly revert mistakes
+9. Use **⇆ DIFF** to compare current setup against selected preset or stock values
+10. Hover any field for a detailed tooltip explaining what it does
+11. Click **💾 SAVE** to persist the preset — it will auto-apply server-wide from then on
+12. Use **EXPORT / IMPORT** to share presets, and **XML** for handling.meta export
+13. Press **Escape** or click **✕ CLOSE** to exit
+
+### Suggested tuning flow
+
+1. Open panel in target vehicle and review class hint in the header
+2. Load a built-in baseline closest to your goal (Race, Drift, Off-Road, Daily)
+3. Lock critical fields before testing alternate presets
+4. Tune one category at a time using guide steps and diff view
+5. Save with a clear preset name and export if you want to share
 
 ### Guide Tabs (manual navigation)
 
@@ -157,11 +180,11 @@ TriggerServerEvent('dg-handlingcontrol:server:requestOpen')
 -- Request current player's saved presets
 TriggerServerEvent('dg-handlingcontrol:server:requestSaved')
 
--- Save a handling preset for a model key
-TriggerServerEvent('dg-handlingcontrol:server:save', modelKey, handlingTable)
+-- Save a named handling preset for a model key
+TriggerServerEvent('dg-handlingcontrol:server:save', presetName, modelKey, handlingTable)
 
--- Delete a saved preset
-TriggerServerEvent('dg-handlingcontrol:server:delete', modelKey)
+-- Delete a named preset
+TriggerServerEvent('dg-handlingcontrol:server:delete', presetName)
 ```
 
 ### NUI Callbacks (client ↔ HTML)
@@ -175,6 +198,22 @@ TriggerServerEvent('dg-handlingcontrol:server:delete', modelKey)
 | `deleteHandling` | Delete a saved preset via server |
 | `resetToDefault` | Re-read GTA default values for the current vehicle |
 | `close` | Release NUI focus and close the panel |
+
+---
+
+### Preset storage format
+
+Saved presets are keyed by preset name. Each entry stores `_modelKey` internally so you can keep multiple named presets for the same vehicle model.
+
+```json
+{
+  "Drift S15": {
+    "_modelKey": "-1041692462",
+    "fInitialDriveForce": 0.39,
+    "fSteeringLock": 62.0
+  }
+}
+```
 
 ---
 
