@@ -7,6 +7,7 @@ let original    = {};
 let modelKey    = '';
 let modelName   = '';
 let vehicleClass = null;
+let vehicleUpgrades = null;
 let savedModels = {};
 let activeTab   = '';
 let fieldFilter = '';
@@ -844,6 +845,7 @@ const diffSummary  = document.getElementById('diff-summary');
 const diffList     = document.getElementById('diff-list');
 const guidePanel   = document.getElementById('hc-guide');
 const classHintEl  = document.getElementById('hc-class-hint');
+const upgradeHintEl = document.getElementById('hc-upgrade-hint');
 const settingsPanel = document.getElementById('hc-settings-panel');
 const themeButtons = Array.from(document.querySelectorAll('.hc-theme-option'));
 const modalBackdrop = document.getElementById('hc-modal-backdrop');
@@ -990,6 +992,10 @@ function updateVehicleClassDisplay() {
 
     vehicleName.textContent = modelName + (modelKey ? ` [${modelKey}]` : '');
     classHintEl.textContent = `CLASS: ${classText} | HINT: ${getSuggestedFocus(classId)}`;
+    if (upgradeHintEl) {
+        const summary = vehicleUpgrades && vehicleUpgrades.summary ? vehicleUpgrades.summary : 'UPGRADES: N/A';
+        upgradeHintEl.textContent = summary;
+    }
 
     if (modeBadge) {
         modeBadge.textContent = aircraftMode ? 'AIRCRAFT MODE' : 'GROUND MODE';
@@ -2282,6 +2288,11 @@ document.getElementById('btn-read-live').addEventListener('click', async () => {
     const live = await nuiFetch('readFields');
     if (live && Object.keys(live).length > 0) {
         current = mergeHandlingWithLocks(current, live);
+        const upgradeData = await nuiFetch('getVehicleUpgrades');
+        if (upgradeData && upgradeData.ok && upgradeData.upgrades) {
+            vehicleUpgrades = upgradeData.upgrades;
+            updateVehicleClassDisplay();
+        }
         renderFields();
         pushUndoSnapshot();
         captureRollbackSnapshot('read-live');
@@ -2366,6 +2377,7 @@ window.addEventListener('message', function(e) {
             modelKey    = d.modelKey  || '';
             modelName   = d.modelName || 'UNKNOWN';
             vehicleClass = d.vehicleClass || null;
+            vehicleUpgrades = d.upgrades || null;
             savedModels = {};
             collapsedCategories = {};
             lockedFields = {};

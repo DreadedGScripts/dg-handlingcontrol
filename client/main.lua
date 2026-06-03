@@ -472,6 +472,60 @@ local function getVehicleClassInfo(veh)
     }
 end
 
+local function formatUpgradeLevel(modIndex, modCount)
+    if modCount <= 0 then
+        return 'N/A'
+    end
+    if modIndex < 0 then
+        return 'Stock'
+    end
+    return ('%d/%d'):format(modIndex + 1, modCount)
+end
+
+local function getVehicleUpgradeInfo(veh)
+    if veh == 0 or not DoesEntityExist(veh) then
+        return {
+            summary = 'UPGRADES: N/A',
+        }
+    end
+
+    -- Ensure we are reading the primary mod kit.
+    SetVehicleModKit(veh, 0)
+
+    local engineCount = GetNumVehicleMods(veh, 11)
+    local brakesCount = GetNumVehicleMods(veh, 12)
+    local transCount = GetNumVehicleMods(veh, 13)
+    local suspensionCount = GetNumVehicleMods(veh, 15)
+    local armorCount = GetNumVehicleMods(veh, 16)
+    local turboCount = GetNumVehicleMods(veh, 18)
+
+    local engine = formatUpgradeLevel(GetVehicleMod(veh, 11), engineCount)
+    local brakes = formatUpgradeLevel(GetVehicleMod(veh, 12), brakesCount)
+    local transmission = formatUpgradeLevel(GetVehicleMod(veh, 13), transCount)
+    local suspension = formatUpgradeLevel(GetVehicleMod(veh, 15), suspensionCount)
+    local armor = formatUpgradeLevel(GetVehicleMod(veh, 16), armorCount)
+
+    local turbo
+    if turboCount <= 0 then
+        turbo = 'N/A'
+    else
+        turbo = IsToggleModOn(veh, 18) and 'On' or 'Off'
+    end
+
+    local summary = ('UPGRADES: ENG %s | BRK %s | TRANS %s | SUSP %s | ARM %s | TURBO %s')
+        :format(engine, brakes, transmission, suspension, armor, turbo)
+
+    return {
+        engine = engine,
+        brakes = brakes,
+        transmission = transmission,
+        suspension = suspension,
+        armor = armor,
+        turbo = turbo,
+        summary = summary,
+    }
+end
+
 local function isAircraftClass(classId)
     return classId == 15 or classId == 16
 end
@@ -881,7 +935,7 @@ local function openEditor()
     local ped = PlayerPedId()
     local veh = GetVehiclePedIsIn(ped, false)
     if veh == 0 then
-        SendNUIMessage({ type = 'open', fields = HANDLING_FIELDS, current = {}, modelName = 'NO VEHICLE', savedMap = savedData })
+        SendNUIMessage({ type = 'open', fields = HANDLING_FIELDS, current = {}, modelName = 'NO VEHICLE', savedMap = savedData, upgrades = nil })
     else
         local activeFields = getHandlingFieldsForVehicle(veh)
         currentVeh = veh
@@ -890,6 +944,7 @@ local function openEditor()
         local current  = readAllFields(veh, activeFields)
         local displayName = GetDisplayNameFromVehicleModel(model)
         local vehicleClass = getVehicleClassInfo(veh)
+        local upgrades = getVehicleUpgradeInfo(veh)
         SendNUIMessage({
             type      = 'open',
             fields    = activeFields,
@@ -897,6 +952,7 @@ local function openEditor()
             modelName = displayName,
             modelKey  = modelKey,
             vehicleClass = vehicleClass,
+            upgrades = upgrades,
             savedMap  = savedData,
         })
     end
@@ -960,6 +1016,15 @@ RegisterNUICallback('readFields', function(_, cb)
         cb(readAllFields(veh))
     else
         cb({})
+    end
+end)
+
+RegisterNUICallback('getVehicleUpgrades', function(_, cb)
+    local veh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if veh ~= 0 then
+        cb({ ok = true, upgrades = getVehicleUpgradeInfo(veh) })
+    else
+        cb({ ok = false })
     end
 end)
 
