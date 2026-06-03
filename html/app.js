@@ -18,6 +18,15 @@ let diffOpen   = false;
 let livePreview = true;
 let guideOpen   = false;
 let guideStep   = 0;
+let expertMode  = false;
+let rollbackSlots = [];
+let benchmarkActive = false;
+let benchmarkStats = null;
+let compareProfiles = {
+    enabled: false,
+    a: '',
+    b: '',
+};
 
 const BUILTIN_PRESETS = [
     {
@@ -656,7 +665,141 @@ const BUILTIN_PRESETS = [
             fSuspensionRaise: 0.01,
         },
     },
+    {
+        id: 'heli_stable_patrol',
+        label: 'Helicopter / Stable Patrol',
+        description: 'Smooth and stable helicopter profile for patrol and utility flying.',
+        handling: {
+            fThrust: 1.2,
+            fThrustFallOff: 0.35,
+            fThrustVectoring: 0.55,
+            fYawMult: 0.95,
+            fRollMult: 1.05,
+            fPitchMult: 1.0,
+            fYawStabilise: 1.25,
+            fRollStabilise: 1.3,
+            fPitchStabilise: 1.2,
+            fFormLiftMult: 1.0,
+            fAttackLiftMult: 0.9,
+            fAttackDiveMult: 0.85,
+            fWindMult: 0.75,
+            fMoveRes: 1.1,
+            fTurnRes: 1.15,
+            fEngineOffGlideMulti: 0.6,
+        },
+    },
+    {
+        id: 'heli_agile_response',
+        label: 'Helicopter / Agile Response',
+        description: 'Faster rotation and punchier thrust for aggressive maneuvering.',
+        handling: {
+            fThrust: 1.45,
+            fThrustFallOff: 0.25,
+            fThrustVectoring: 0.85,
+            fYawMult: 1.35,
+            fRollMult: 1.45,
+            fPitchMult: 1.38,
+            fYawStabilise: 0.95,
+            fRollStabilise: 1.0,
+            fPitchStabilise: 0.95,
+            fFormLiftMult: 1.05,
+            fAttackLiftMult: 1.1,
+            fAttackDiveMult: 1.15,
+            fWindMult: 0.9,
+            fMoveRes: 0.95,
+            fTurnRes: 0.9,
+            fEngineOffGlideMulti: 0.7,
+        },
+    },
+    {
+        id: 'plane_cruise_stable',
+        label: 'Plane / Cruise Stable',
+        description: 'Balanced fixed-wing setup for smooth cruise and reliable approaches.',
+        handling: {
+            fThrust: 1.35,
+            fThrustFallOff: 0.3,
+            fThrustVectoring: 0.35,
+            fYawMult: 0.75,
+            fRollMult: 0.95,
+            fPitchMult: 0.88,
+            fYawStabilise: 1.35,
+            fRollStabilise: 1.3,
+            fPitchStabilise: 1.25,
+            fFormLiftMult: 1.35,
+            fAttackLiftMult: 1.0,
+            fAttackDiveMult: 0.9,
+            fGearDownDragV: 1.1,
+            fGearDownLiftMult: 0.85,
+            fWindMult: 0.75,
+            fMoveRes: 1.2,
+            fTurnRes: 1.25,
+            fEngineOffGlideMulti: 1.35,
+        },
+    },
+    {
+        id: 'plane_stunt_aggressive',
+        label: 'Plane / Stunt Aggressive',
+        description: 'High-response aerobatic profile with quick roll and pitch authority.',
+        handling: {
+            fThrust: 1.75,
+            fThrustFallOff: 0.18,
+            fThrustVectoring: 0.7,
+            fYawMult: 1.2,
+            fRollMult: 1.65,
+            fPitchMult: 1.55,
+            fYawStabilise: 0.85,
+            fRollStabilise: 0.8,
+            fPitchStabilise: 0.78,
+            fFormLiftMult: 1.15,
+            fAttackLiftMult: 1.25,
+            fAttackDiveMult: 1.35,
+            fGearDownDragV: 1.35,
+            fGearDownLiftMult: 0.72,
+            fWindMult: 1.05,
+            fMoveRes: 0.85,
+            fTurnRes: 0.8,
+            fEngineOffGlideMulti: 1.1,
+        },
+    },
 ];
+
+const CLASS_PRESET_SUGGESTIONS = {
+    0: ['daily', 'economy'],
+    1: ['daily', 'highway_cruiser'],
+    2: ['street_grip', 'offroad'],
+    3: ['street_grip', 'race'],
+    4: ['drift_easy', 'street_grip'],
+    5: ['street_grip', 'race'],
+    6: ['race', 'street_grip'],
+    7: ['time_attack', 'race'],
+    8: ['stunt', 'daily'],
+    9: ['offroad', 'rally'],
+    10: ['truck_cargo', 'armored'],
+    11: ['service_flatbed', 'tow_light_duty'],
+    12: ['highway_cruiser', 'service_flatbed'],
+    15: ['heli_stable_patrol', 'heli_agile_response'],
+    16: ['plane_cruise_stable', 'plane_stunt_aggressive'],
+    17: ['service_flatbed', 'tow_city'],
+    18: ['pursuit', 'rain_safe'],
+    19: ['armored', 'truck_cargo'],
+    20: ['truck_cargo', 'highway_cruiser'],
+};
+
+const SAFE_BOUNDS = {
+    fInitialDriveForce: [0.05, 1.25],
+    fInitialDriveMaxFlatVel: [60, 320],
+    fBrakeForce: [0.2, 2.2],
+    fSteeringLock: [20, 68],
+    fTractionCurveMax: [0.8, 3.6],
+    fTractionCurveMin: [0.7, 3.2],
+    fTractionLossMult: [0.3, 3.2],
+    fSuspensionForce: [1.2, 12.5],
+    fSuspensionRaise: [-0.2, 0.35],
+    fCollisionDamageMult: [0.0, 3.0],
+    fWeaponDamageMult: [0.0, 3.0],
+    fDeformationDamageMult: [0.0, 3.0],
+    fEngineDamageMult: [0.0, 3.0],
+};
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
 const overlay      = document.getElementById('hc-overlay');
@@ -665,7 +808,7 @@ const tabBar       = document.getElementById('hc-tabs');
 const fieldsEl     = document.getElementById('hc-fields');
 const categoryEmpty = document.getElementById('hc-category-empty');
 const bodyCategory  = document.getElementById('hc-body-category');
-const classBadge    = document.getElementById('hc-vehicle-name');
+const modeBadge     = document.getElementById('hc-mode-badge');
 const statusEl     = document.getElementById('hc-status');
 const btnUndo      = document.getElementById('btn-undo');
 const btnRedo      = document.getElementById('btn-redo');
@@ -676,9 +819,22 @@ const btnExportXml = document.getElementById('btn-export-xml');
 const btnExportPreset = document.getElementById('btn-export-preset');
 const btnImportPreset = document.getElementById('btn-import-preset');
 const presetSelect     = document.getElementById('preset-select');
- const presetNameInput  = document.getElementById('preset-name-input');
+const classSuggestSelect = document.getElementById('class-suggest-select');
+const btnApplySuggest = document.getElementById('btn-apply-suggest');
+const presetNameInput  = document.getElementById('preset-name-input');
 const fieldFilterInput  = document.getElementById('field-filter-input');
 const toggleLive       = document.getElementById('toggle-live');
+const toggleExpert     = document.getElementById('toggle-expert');
+const btnSnapshot      = document.getElementById('btn-snapshot');
+const btnRollback      = document.getElementById('btn-rollback');
+const btnBenchmark     = document.getElementById('btn-benchmark');
+const btnAudit         = document.getElementById('btn-audit');
+const btnSettings      = document.getElementById('btn-settings');
+const btnRestorePreset = document.getElementById('btn-restore-preset');
+const restoreSlotSelect = document.getElementById('restore-slot-select');
+const compareSelectA   = document.getElementById('compare-select-a');
+const compareSelectB   = document.getElementById('compare-select-b');
+const btnCompareProfiles = document.getElementById('btn-compare-profiles');
 const tooltip      = document.getElementById('hc-tooltip');
 const tooltipLabel = document.getElementById('hc-tooltip-label');
 const tooltipDesc  = document.getElementById('hc-tooltip-desc');
@@ -688,6 +844,8 @@ const diffSummary  = document.getElementById('diff-summary');
 const diffList     = document.getElementById('diff-list');
 const guidePanel   = document.getElementById('hc-guide');
 const classHintEl  = document.getElementById('hc-class-hint');
+const settingsPanel = document.getElementById('hc-settings-panel');
+const themeButtons = Array.from(document.querySelectorAll('.hc-theme-option'));
 const modalBackdrop = document.getElementById('hc-modal-backdrop');
 const modalTitle    = document.getElementById('hc-modal-title');
 const modalSubtitle = document.getElementById('hc-modal-subtitle');
@@ -696,14 +854,45 @@ const modalCopyBtn  = document.getElementById('btn-modal-copy');
 const modalDownloadBtn = document.getElementById('btn-modal-download');
 const modalSubmitBtn = document.getElementById('btn-modal-submit');
 const modalCloseBtn = document.getElementById('btn-modal-close');
+const liveDiffEl = document.getElementById('hc-live-diff');
 
 let modalMode = '';
+const THEME_KEY = 'dg.handlingcontrol.theme';
+const AVAILABLE_THEMES = ['dg-default', 'dg-slate', 'dg-sunset', 'dg-ice'];
+
+function updateThemeButtons(theme) {
+    for (const btn of themeButtons) {
+        btn.classList.toggle('active', btn.dataset.theme === theme);
+    }
+}
+
+function applyTheme(theme, persist = true) {
+    const selected = AVAILABLE_THEMES.includes(theme) ? theme : 'dg-default';
+    document.documentElement.setAttribute('data-theme', selected);
+    updateThemeButtons(selected);
+    if (persist) {
+        localStorage.setItem(THEME_KEY, selected);
+    }
+}
+
+function loadThemePreference() {
+    const saved = localStorage.getItem(THEME_KEY) || 'dg-default';
+    applyTheme(saved, false);
+}
+
+function toggleSettingsPanel(force) {
+    if (!settingsPanel) return;
+    const shouldOpen = typeof force === 'boolean' ? force : settingsPanel.classList.contains('hidden');
+    settingsPanel.classList.toggle('hidden', !shouldOpen);
+}
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 function setStatus(msg, type = '') {
     statusEl.textContent = msg;
     statusEl.className = type;
 }
+
+loadThemePreference();
 
 function round(v, step) {
     if (step >= 1) return Math.round(v);
@@ -736,8 +925,30 @@ function getPresetLabel(value) {
     return preset ? `Baseline: ${preset.label}` : String(value || '');
 }
 
+function getNamedHandling(value) {
+    const key = String(value || '');
+    if (!key) return null;
+    const builtin = getBuiltinPreset(key);
+    if (builtin) {
+        return {
+            key,
+            label: `Baseline: ${builtin.label}`,
+            handling: builtin.handling,
+        };
+    }
+    if (savedModels[key]) {
+        return {
+            key,
+            label: key,
+            handling: savedModels[key],
+        };
+    }
+    return null;
+}
+
 function getBuiltinPresetCategory(preset) {
     const id = preset && preset.id ? preset.id : '';
+    if (id.startsWith('heli_') || id.startsWith('plane_')) return 'Aircraft';
     if (id.includes('drift')) return 'Drift';
     if (id === 'race' || id === 'time_attack' || id === 'drag') return 'Track & Speed';
     if (id === 'offroad' || id === 'rally') return 'Off-Road & Rally';
@@ -758,8 +969,17 @@ function updateVehicleClassDisplay() {
     const name = vehicleClass && vehicleClass.name ? vehicleClass.name : 'UNKNOWN CLASS';
     const id = vehicleClass && vehicleClass.id !== undefined ? vehicleClass.id : '';
     const classText = id === '' ? name : `${name} [${id}]`;
-    classBadge.textContent = modelName + (modelKey ? ` [${modelKey}]` : '') + ` • ${classText}`;
-    classHintEl.textContent = `CLASS HINT: ${getSuggestedFocus(vehicleClass && vehicleClass.id)}`;
+    const classId = vehicleClass && vehicleClass.id;
+    const aircraftMode = classId === 15 || classId === 16;
+
+    vehicleName.textContent = modelName + (modelKey ? ` [${modelKey}]` : '');
+    classHintEl.textContent = `CLASS: ${classText} | HINT: ${getSuggestedFocus(classId)}`;
+
+    if (modeBadge) {
+        modeBadge.textContent = aircraftMode ? 'AIRCRAFT MODE' : 'GROUND MODE';
+        modeBadge.classList.toggle('mode-aircraft', aircraftMode);
+        modeBadge.classList.toggle('mode-ground', !aircraftMode);
+    }
 }
 
 function getSuggestedFocus(classId) {
@@ -780,8 +1000,8 @@ function getSuggestedFocus(classId) {
         case 12: return 'Van / Stability';
         case 13: return 'Cycle / Minimal Tuning';
         case 14: return 'Boat / N/A';
-        case 15: return 'Helicopter / N/A';
-        case 16: return 'Plane / N/A';
+        case 15: return 'Helicopter / Flight Control';
+        case 16: return 'Plane / Flight Control';
         case 17: return 'Service / Stability';
         case 18: return 'Emergency / Brakes';
         case 19: return 'Military / Durability';
@@ -789,6 +1009,156 @@ function getSuggestedFocus(classId) {
         case 21: return 'Train / N/A';
         default: return 'General Tuning';
     }
+}
+
+function getSuggestedPresetIds(classId) {
+    return CLASS_PRESET_SUGGESTIONS[classId] || [];
+}
+
+function getSuggestedPresets(classId) {
+    return getSuggestedPresetIds(classId)
+        .map(id => BUILTIN_PRESETS.find(p => p.id === id))
+        .filter(Boolean);
+}
+
+function refreshClassSuggestions() {
+    classSuggestSelect.innerHTML = '<option value="">— Class Suggestion —</option>';
+    const suggestions = getSuggestedPresets(vehicleClass && vehicleClass.id);
+    for (const preset of suggestions) {
+        const opt = document.createElement('option');
+        opt.value = `builtin:${preset.id}`;
+        opt.textContent = `Suggested: ${preset.label}`;
+        classSuggestSelect.appendChild(opt);
+    }
+    btnApplySuggest.disabled = suggestions.length === 0;
+}
+
+function getSafeBounds(fieldKey) {
+    return SAFE_BOUNDS[fieldKey] || null;
+}
+
+function sanitizeFieldValue(field, value, options = {}) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return Number(current[field.key] || field.min || 0);
+    let next = numeric;
+    let wasClamped = false;
+    const bounds = getSafeBounds(field.key);
+    if (!expertMode && bounds) {
+        const before = next;
+        next = clamp(next, bounds[0], bounds[1]);
+        wasClamped = before !== next;
+        if (wasClamped && !options.silent) {
+            setStatus(`${field.label}: capped to safe range (${bounds[0]} to ${bounds[1]}). Enable Expert Mode to bypass.`, 'warn');
+        }
+    }
+    next = clamp(next, field.min, field.max);
+    return field.getter === 'GetVehicleHandlingInt' ? Math.round(next) : round(next, field.step);
+}
+
+function sanitizeHandlingForSafety(input, options = {}) {
+    const out = cloneHandling(input);
+    let blocked = 0;
+    for (const f of fields) {
+        if (out[f.key] === undefined) continue;
+        const before = out[f.key];
+        const next = sanitizeFieldValue(f, before, { silent: true });
+        out[f.key] = next;
+        if (Number(before) !== Number(next)) blocked++;
+    }
+    if (blocked > 0 && !expertMode && !options.silent) {
+        setStatus(`Safety guard adjusted ${blocked} value(s). Toggle Expert Mode to allow extremes.`, 'warn');
+    }
+    return { handling: out, blocked };
+}
+
+function getRiskLevel(field, value) {
+    const bounds = getSafeBounds(field.key);
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'safe';
+    if (bounds && (numeric < bounds[0] || numeric > bounds[1])) return 'extreme';
+    if (bounds) {
+        const span = Math.max(0.0001, bounds[1] - bounds[0]);
+        const ratio = (numeric - bounds[0]) / span;
+        if (ratio < 0.12 || ratio > 0.88) return 'aggressive';
+        return 'safe';
+    }
+    const range = Math.max(0.0001, field.max - field.min);
+    const center = (field.max + field.min) / 2;
+    const distance = Math.abs((numeric - center) / (range / 2));
+    if (distance > 0.9) return 'extreme';
+    if (distance > 0.7) return 'aggressive';
+    return 'safe';
+}
+
+function updateLiveDiffSummary() {
+    let changed = 0;
+    let sumPct = 0;
+    let pctCount = 0;
+    for (const f of fields) {
+        const curr = Number(current[f.key]);
+        const base = Number(original[f.key]);
+        if (!Number.isFinite(curr) || !Number.isFinite(base)) continue;
+        if (curr !== base) changed++;
+        if (base !== 0 && curr !== base) {
+            sumPct += ((curr - base) / Math.abs(base)) * 100;
+            pctCount++;
+        }
+    }
+    const avgPct = pctCount > 0 ? (sumPct / pctCount) : 0;
+    liveDiffEl.textContent = `Live Diff: ${changed} changed (${avgPct >= 0 ? '+' : ''}${avgPct.toFixed(2)}%)`;
+}
+
+function getRollbackStorageKey() {
+    return `dg-handlingcontrol.rollback.${modelKey || 'unknown'}`;
+}
+
+function loadRollbackSlots() {
+    rollbackSlots = [];
+    if (!modelKey) return;
+    try {
+        const raw = localStorage.getItem(getRollbackStorageKey());
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) rollbackSlots = parsed.slice(0, 5);
+    } catch (_) {}
+}
+
+function persistRollbackSlots() {
+    if (!modelKey) return;
+    try {
+        localStorage.setItem(getRollbackStorageKey(), JSON.stringify(rollbackSlots.slice(0, 5)));
+    } catch (_) {}
+}
+
+function captureRollbackSnapshot(reason) {
+    if (!modelKey) return;
+    rollbackSlots.unshift({
+        ts: Date.now(),
+        reason: reason || 'snapshot',
+        handling: cloneHandling(current),
+    });
+    rollbackSlots = rollbackSlots.slice(0, 5);
+    persistRollbackSlots();
+}
+
+async function rollbackLatestSnapshot() {
+    if (!rollbackSlots.length) {
+        setStatus('No rollback snapshot available yet.', 'error');
+        return;
+    }
+    const snapshot = rollbackSlots[0];
+    const sanitized = sanitizeHandlingForSafety(snapshot.handling, { silent: false });
+    current = mergeHandlingWithLocks(current, sanitized.handling);
+    renderFields();
+    pushUndoSnapshot();
+    await nuiFetch('applyAll', { handling: current });
+    setStatus(`Rolled back to ${new Date(snapshot.ts).toLocaleTimeString()} (${snapshot.reason}).`, 'ok');
+}
+
+function setBenchmarkButtonState(active) {
+    benchmarkActive = !!active;
+    btnBenchmark.classList.toggle('benchmark-active', benchmarkActive);
+    btnBenchmark.textContent = benchmarkActive ? '⏹ BENCH STOP' : '⏱ BENCH';
 }
 
 function updateDiffToggle() {
@@ -822,6 +1192,20 @@ function mergeHandlingWithLocks(base, next) {
 }
 
 function getComparisonSource() {
+    if (compareProfiles.enabled) {
+        const sourceA = getNamedHandling(compareProfiles.a);
+        const sourceB = getNamedHandling(compareProfiles.b);
+        if (sourceA && sourceB) {
+            return {
+                mode: 'profiles',
+                leftLabel: sourceA.label,
+                leftHandling: sourceA.handling,
+                rightLabel: sourceB.label,
+                rightHandling: sourceB.handling,
+            };
+        }
+    }
+
     const selected = presetSelect.value;
     if (selected) {
         if (isBuiltinPresetValue(selected)) {
@@ -831,18 +1215,24 @@ function getComparisonSource() {
             return { label: selected, handling: savedModels[selected] };
         }
     }
-    return { label: 'Stock / original', handling: original };
+    return { mode: 'current', label: 'Stock / original', handling: original };
 }
 
 function renderDiffPanel() {
     if (!diffOpen) return;
 
     const source = getComparisonSource();
-    const compare = source.handling || {};
+    const compare = source.mode === 'profiles' ? (source.rightHandling || {}) : (source.handling || {});
+    const currentSource = source.mode === 'profiles' ? (source.leftHandling || {}) : current;
     const total = fields.length;
     let changed = 0;
 
-    diffSummary.textContent = `Comparing current values against ${source.label}. Fields with differences are highlighted.`;
+    const leftLabel = source.mode === 'profiles' ? source.leftLabel : 'Current';
+    const rightLabel = source.mode === 'profiles' ? source.rightLabel : source.label;
+
+    diffSummary.textContent = source.mode === 'profiles'
+        ? `Comparing ${leftLabel} vs ${rightLabel}. Fields with differences are highlighted.`
+        : `Comparing current values against ${source.label}. Fields with differences are highlighted.`;
     diffList.innerHTML = '';
 
     if (!fields.length) {
@@ -851,11 +1241,16 @@ function renderDiffPanel() {
     }
 
     for (const f of fields) {
-        const currentValue = current[f.key];
+        const currentValue = currentSource[f.key];
         const compareValue = compare[f.key];
         const currentText = currentValue === undefined ? '—' : String(currentValue);
         const compareText = compareValue === undefined ? '—' : String(compareValue);
         const mismatch = currentValue !== compareValue;
+        let pctText = 'Δ% N/A';
+        if (typeof currentValue === 'number' && typeof compareValue === 'number' && compareValue !== 0) {
+            const pct = ((currentValue - compareValue) / Math.abs(compareValue)) * 100;
+            pctText = `Δ% ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+        }
         if (mismatch) changed++;
 
         const row = document.createElement('div');
@@ -866,14 +1261,17 @@ function renderDiffPanel() {
                 <div class="diff-row-cat">${f.cat}</div>
             </div>
             <div class="diff-values">
-                <div class="diff-value current ${mismatch ? 'mismatch' : ''}"><span>Current</span>${currentText}</div>
-                <div class="diff-value compare ${mismatch ? 'mismatch' : ''}"><span>${source.label}</span>${compareText}</div>
+                <div class="diff-value current ${mismatch ? 'mismatch' : ''}"><span>${leftLabel}</span>${currentText}</div>
+                <div class="diff-value compare ${mismatch ? 'mismatch' : ''}"><span>${rightLabel}</span>${compareText}</div>
             </div>
+            <div class="diff-percent">${pctText}</div>
         `;
         diffList.appendChild(row);
     }
 
-    diffSummary.textContent = `Comparing current values against ${source.label}. ${changed} of ${total} fields differ.`;
+    diffSummary.textContent = source.mode === 'profiles'
+        ? `Comparing ${leftLabel} vs ${rightLabel}. ${changed} of ${total} fields differ.`
+        : `Comparing current values against ${source.label}. ${changed} of ${total} fields differ.`;
 }
 
 function setDiffOpen(nextState) {
@@ -908,6 +1306,7 @@ function pushUndoSnapshot() {
 function setCurrentHandling(next, options = {}) {
     current = cloneHandling(next);
     renderFields();
+    updateLiveDiffSummary();
     if (options.pushHistory !== false) pushUndoSnapshot();
 }
 
@@ -922,6 +1321,7 @@ function undoChange() {
     undoStack.pop();
     current = cloneHandling(undoStack[undoStack.length - 1]);
     renderFields();
+    updateLiveDiffSummary();
     nuiFetch('applyAll', { handling: current });
     updateHistoryButtons();
     setStatus('Undo applied.', 'ok');
@@ -933,6 +1333,7 @@ function redoChange() {
     current = cloneHandling(snapshot);
     undoStack.push(cloneHandling(snapshot));
     renderFields();
+    updateLiveDiffSummary();
     nuiFetch('applyAll', { handling: current });
     updateHistoryButtons();
     setStatus('Redo applied.', 'ok');
@@ -1044,6 +1445,8 @@ function importModalSubmit() {
             presetSelect.value = name;
             await nuiFetch('saveHandling', { presetName: name, modelKey: saveModelKey, handling: current });
         }
+
+        captureRollbackSnapshot('import');
 
         setStatus(`Imported preset${name ? `: ${name}` : ''}.`, 'ok');
         closeModal();
@@ -1214,6 +1617,7 @@ function renderFields() {
     }
     if (guideOpen) applyGuideHighlights();
     renderDiffPanel();
+    updateLiveDiffSummary();
 }
 
 function buildFieldCard(f) {
@@ -1257,6 +1661,15 @@ function buildFieldCard(f) {
     labelRow.appendChild(resetBtn);
     labelRow.appendChild(lockBtn);
     card.appendChild(labelRow);
+
+    const topMeta = document.createElement('div');
+    topMeta.className = 'hc-field-meta-top';
+    const riskBadge = document.createElement('span');
+    const riskLevel = getRiskLevel(f, val);
+    riskBadge.className = `hc-risk-badge ${riskLevel}`;
+    riskBadge.textContent = `Risk: ${riskLevel.toUpperCase()}`;
+    topMeta.appendChild(riskBadge);
+    card.appendChild(topMeta);
 
     const delta = document.createElement('div');
     delta.className = 'hc-field-delta' + (val !== orig ? ' dirty' : ' clean');
@@ -1302,7 +1715,7 @@ function buildFieldCard(f) {
 
     function syncFromSlider() {
         if (syncing) return;
-        const v = round(parseFloat(slider.value), f.step);
+        const v = sanitizeFieldValue(f, parseFloat(slider.value));
         setInputs(v);
         current[f.key] = v;
         updateDirty(f.key, card);
@@ -1313,7 +1726,7 @@ function buildFieldCard(f) {
 
     function syncFromNum() {
         if (syncing) return;
-        let v = round(clamp(parseFloat(num.value) || 0, f.min, f.max), f.step);
+        let v = sanitizeFieldValue(f, parseFloat(num.value) || 0);
         setInputs(v);
         current[f.key] = v;
         updateDirty(f.key, card);
@@ -1339,12 +1752,13 @@ function buildFieldCard(f) {
     });
 
     function setNumeric(v) {
-        setInputs(v);
-        current[f.key] = v;
+        const safe = sanitizeFieldValue(f, v);
+        setInputs(safe);
+        current[f.key] = safe;
         updateDirty(f.key, card);
-        updateDeltaDisplay(delta, v, orig, f.step);
+        updateDeltaDisplay(delta, safe, orig, f.step);
         pushUndoSnapshot();
-        if (livePreview) sendApplyField(f, v, isInt);
+        if (livePreview) sendApplyField(f, safe, isInt);
     }
 
     btnMinus.addEventListener('click', () => {
@@ -1377,7 +1791,7 @@ function updateDirty(key, card) {
 function refreshPresetDropdown() {
     presetSelect.innerHTML = '<option value="">— Load Preset —</option>';
 
-    const categoryOrder = ['Track & Speed', 'Drift', 'Off-Road & Rally', 'Street & Safety', 'Trucks & Utility', 'Special Purpose', 'Other'];
+    const categoryOrder = ['Track & Speed', 'Drift', 'Off-Road & Rally', 'Street & Safety', 'Trucks & Utility', 'Special Purpose', 'Aircraft', 'Other'];
     const grouped = {};
     for (const category of categoryOrder) grouped[category] = [];
 
@@ -1412,6 +1826,100 @@ function refreshPresetDropdown() {
         savedGroup.appendChild(opt);
     }
     presetSelect.appendChild(savedGroup);
+    refreshCompareSelectors();
+}
+
+async function applyPresetValue(selectionValue, sourceLabel) {
+    const key = String(selectionValue || '');
+    if (!key) return;
+    const builtin = getBuiltinPreset(key);
+    const entry = builtin ? builtin.handling : savedModels[key];
+    if (!entry) return;
+
+    const sanitized = sanitizeHandlingForSafety(entry, { silent: false });
+    current = mergeHandlingWithLocks(current, sanitized.handling);
+    renderFields();
+    pushUndoSnapshot();
+    await nuiFetch('applyAll', { handling: current });
+    captureRollbackSnapshot(sourceLabel || (builtin ? `builtin:${builtin.id}` : `preset:${key}`));
+    setStatus(`${builtin ? 'Baseline' : 'Preset'} loaded & applied: ${builtin ? builtin.label : key}.`, 'ok');
+}
+
+function formatBenchmarkLine(data) {
+    const elapsed = Number(data.elapsedSec || 0).toFixed(2);
+    const speed = Number(data.speedKmh || 0).toFixed(1);
+    const dist = Number(data.distanceM || 0).toFixed(1);
+    const cp = `${Math.max(0, Number(data.checkpointIndex || 0))}/${Math.max(0, Number(data.checkpointTotal || 0))}`;
+    const accel = Number(data.accel0to100Sec || 0) > 0 ? `${Number(data.accel0to100Sec).toFixed(2)}s` : '—';
+    const brake = Number(data.brake100to20M || 0) > 0 ? `${Number(data.brake100to20M).toFixed(1)}m` : '—';
+    return `Bench ${cp} | t ${elapsed}s | v ${speed} km/h | d ${dist}m | 0-100 ${accel} | 100-20 ${brake}`;
+}
+
+function refreshCompareSelectors() {
+    const previousA = compareSelectA.value;
+    const previousB = compareSelectB.value;
+    compareSelectA.innerHTML = '<option value="">Compare A</option>';
+    compareSelectB.innerHTML = '<option value="">Compare B</option>';
+
+    for (const preset of BUILTIN_PRESETS) {
+        const value = `builtin:${preset.id}`;
+        const label = `Baseline: ${preset.label}`;
+        const aOpt = document.createElement('option');
+        aOpt.value = value;
+        aOpt.textContent = label;
+        compareSelectA.appendChild(aOpt);
+
+        const bOpt = document.createElement('option');
+        bOpt.value = value;
+        bOpt.textContent = label;
+        compareSelectB.appendChild(bOpt);
+    }
+
+    for (const key of Object.keys(savedModels)) {
+        const aOpt = document.createElement('option');
+        aOpt.value = key;
+        aOpt.textContent = `Saved: ${key}`;
+        compareSelectA.appendChild(aOpt);
+
+        const bOpt = document.createElement('option');
+        bOpt.value = key;
+        bOpt.textContent = `Saved: ${key}`;
+        compareSelectB.appendChild(bOpt);
+    }
+
+    if (previousA) compareSelectA.value = previousA;
+    if (previousB) compareSelectB.value = previousB;
+}
+
+function formatAuditReport(payload) {
+    const audit = Array.isArray(payload && payload.audit) ? payload.audit : [];
+    const restore = payload && payload.restore && typeof payload.restore === 'object' ? payload.restore : {};
+
+    const lines = [];
+    lines.push('DG Handling Control Audit');
+    lines.push('===========================');
+    lines.push(`Entries: ${audit.length}`);
+    lines.push(`Restore buckets: ${Object.keys(restore).length}`);
+    lines.push('');
+    lines.push('Recent Events:');
+
+    for (const entry of audit.slice(0, 40)) {
+        const stamp = entry.ts ? new Date(Number(entry.ts) * 1000).toISOString() : 'unknown-time';
+        const action = entry.action || 'unknown';
+        const player = entry.player || 'unknown-player';
+        const preset = entry.presetName || '-';
+        const model = entry.modelKey || '-';
+        lines.push(`[${stamp}] ${action} | player=${player} | preset=${preset} | model=${model}`);
+    }
+
+    lines.push('');
+    lines.push('Restore Buckets:');
+    for (const [preset, bucket] of Object.entries(restore)) {
+        const count = Array.isArray(bucket) ? bucket.length : 0;
+        lines.push(`- ${preset}: ${count} point(s)`);
+    }
+
+    return lines.join('\n');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1498,7 +2006,6 @@ function renderGuideStep() {
     document.getElementById('guide-goal').textContent = step.goal;
     document.getElementById('guide-instructions').textContent = step.instructions;
 
-    // Field reference list (clickable — jump to field)
     const list = document.getElementById('guide-fields-list');
     list.innerHTML = '';
     for (const key of step.fields) {
@@ -1511,7 +2018,6 @@ function renderGuideStep() {
         list.appendChild(ref);
     }
 
-    // Progress dots
     const dotsEl = document.getElementById('guide-dots');
     dotsEl.innerHTML = '';
     for (let i = 0; i < GUIDE_STEPS.length; i++) {
@@ -1522,7 +2028,6 @@ function renderGuideStep() {
         dotsEl.appendChild(dot);
     }
 
-    // Switch to the step's category tab
     if (step.cat !== activeTab) switchTab(step.cat);
     if (isCategoryCollapsed(step.cat)) setCategoryCollapsed(step.cat, false);
     else { renderFields(); applyGuideHighlights(); }
@@ -1620,6 +2125,112 @@ btnImportPreset.addEventListener('click', async () => {
     setStatus('Paste preset data in the modal, then import it.', 'ok');
 });
 
+btnApplySuggest.addEventListener('click', async () => {
+    const selection = classSuggestSelect.value;
+    if (!selection) {
+        setStatus('No class suggestion available for this vehicle.', 'error');
+        return;
+    }
+    await applyPresetValue(selection, 'class-suggestion');
+    presetSelect.value = selection;
+});
+
+btnSnapshot.addEventListener('click', () => {
+    captureRollbackSnapshot('manual');
+    setStatus('Snapshot captured for instant rollback.', 'ok');
+});
+
+btnRollback.addEventListener('click', async () => {
+    await rollbackLatestSnapshot();
+});
+
+toggleExpert.addEventListener('change', () => {
+    expertMode = toggleExpert.checked;
+    setStatus(expertMode ? 'Expert Mode enabled. Extreme ranges are now allowed.' : 'Expert Mode disabled. Safe bounds are enforced.', expertMode ? 'warn' : 'ok');
+    renderFields();
+});
+
+btnBenchmark.addEventListener('click', async () => {
+    if (!benchmarkActive) {
+        const started = await nuiFetch('benchmarkStart', {});
+        if (started && started.ok) {
+            setBenchmarkButtonState(true);
+            setStatus('Teleported to airport. AI benchmark now includes hard turns and handbrake turns, then returns you.', 'ok');
+        } else {
+            setStatus('Could not start benchmark (you must be in driver seat).', 'error');
+        }
+    } else {
+        await nuiFetch('benchmarkStop', {});
+        setBenchmarkButtonState(false);
+        setStatus('Benchmark loop stopped.', 'warn');
+    }
+});
+
+if (btnSettings) {
+    btnSettings.addEventListener('click', () => {
+        toggleSettingsPanel();
+    });
+}
+
+for (const themeBtn of themeButtons) {
+    themeBtn.addEventListener('click', () => {
+        const next = themeBtn.dataset.theme || 'dg-default';
+        applyTheme(next, true);
+        setStatus(`Theme changed to ${themeBtn.textContent}.`, 'ok');
+        toggleSettingsPanel(false);
+    });
+}
+
+btnCompareProfiles.addEventListener('click', () => {
+    const a = compareSelectA.value;
+    const b = compareSelectB.value;
+    if (!a || !b) {
+        setStatus('Pick both Compare A and Compare B first.', 'error');
+        return;
+    }
+    if (a === b) {
+        setStatus('Compare A and B must be different profiles.', 'error');
+        return;
+    }
+    compareProfiles.enabled = true;
+    compareProfiles.a = a;
+    compareProfiles.b = b;
+    setDiffOpen(true);
+    setStatus('Profile comparison loaded in DIFF panel.', 'ok');
+});
+
+btnAudit.addEventListener('click', async () => {
+    const payload = await nuiFetch('requestAudit', {});
+    const text = formatAuditReport(payload || {});
+    openExportModal(text, `handling-audit-${Date.now()}.txt`);
+    setStatus('Audit report opened. Copy or download as needed.', 'ok');
+});
+
+btnRestorePreset.addEventListener('click', async () => {
+    const key = presetSelect.value;
+    if (!key || isBuiltinPresetValue(key)) {
+        setStatus('Select a saved preset to restore.', 'error');
+        return;
+    }
+    const slotIndex = Math.max(1, Math.min(5, Number(restoreSlotSelect && restoreSlotSelect.value || 1) || 1));
+    const result = await nuiFetch('restorePreset', { presetName: key, slotIndex });
+    if (!result || !result.ok) {
+        setStatus('No restore point found for this preset.', 'error');
+        return;
+    }
+
+    const restored = result.handling || null;
+    if (restored) {
+        savedModels[key] = restored;
+        current = mergeHandlingWithLocks(current, restored);
+        renderFields();
+        pushUndoSnapshot();
+        await nuiFetch('applyAll', { handling: current });
+        captureRollbackSnapshot(`restore:${key}`);
+    }
+    setStatus(`Preset restored from slot ${slotIndex}: ${key}.`, 'ok');
+});
+
 fieldFilterInput.addEventListener('input', () => {
     fieldFilter = fieldFilterInput.value || '';
     renderFields();
@@ -1644,6 +2255,7 @@ modalBackdrop.addEventListener('click', e => {
 function doClose() {
     overlay.classList.add('hidden');
     closeGuide();
+    toggleSettingsPanel(false);
     nuiFetch('close');
 }
 
@@ -1656,6 +2268,7 @@ document.getElementById('btn-read-live').addEventListener('click', async () => {
         current = mergeHandlingWithLocks(current, live);
         renderFields();
         pushUndoSnapshot();
+        captureRollbackSnapshot('read-live');
         setStatus('Live values refreshed.', 'ok');
     } else {
         setStatus('Not in a vehicle.', 'error');
@@ -1669,6 +2282,7 @@ document.getElementById('btn-reset-default').addEventListener('click', async () 
         current = mergeHandlingWithLocks(current, defaults);
         renderFields();
         pushUndoSnapshot();
+        captureRollbackSnapshot('defaults');
         setStatus('Handling reset to GTA defaults.', 'ok');
     } else {
         setStatus('Not in a vehicle — cannot reset.', 'error');
@@ -1677,7 +2291,10 @@ document.getElementById('btn-reset-default').addEventListener('click', async () 
 
 document.getElementById('btn-apply-all').addEventListener('click', async () => {
     setStatus('Applying all…', 'warn');
+    const sanitized = sanitizeHandlingForSafety(current, { silent: false });
+    current = sanitized.handling;
     await nuiFetch('applyAll', { handling: current });
+    captureRollbackSnapshot('apply-all');
     setStatus('All handling values applied to vehicle.', 'ok');
 });
 
@@ -1688,6 +2305,7 @@ document.getElementById('btn-save-preset').addEventListener('click', async () =>
     setStatus('Saving preset…', 'warn');
     savedModels[name] = { _modelKey: modelKey, ...current };
     await nuiFetch('saveHandling', { presetName: name, modelKey, handling: current });
+    captureRollbackSnapshot(`save:${name}`);
     refreshPresetDropdown();
     // Select the just-saved entry in the dropdown
     presetSelect.value = name;
@@ -1710,15 +2328,9 @@ presetSelect.addEventListener('change', async () => {
     if (key && !isBuiltinPresetValue(key)) presetNameInput.value = key;
     if (!key) return;
 
-    const builtin = getBuiltinPreset(key);
-    const entry = builtin ? builtin.handling : savedModels[key];
-    if (!entry) return;
+    compareProfiles.enabled = false;
 
-    current = mergeHandlingWithLocks(current, entry);
-    renderFields();
-    pushUndoSnapshot();
-    await nuiFetch('applyAll', { handling: current });
-    setStatus(`${builtin ? 'Baseline' : 'Preset'} loaded & applied: ${builtin ? builtin.label : key}.`, 'ok');
+    await applyPresetValue(key, 'preset-select');
 });
 
 toggleLive.addEventListener('change', () => {
@@ -1741,8 +2353,13 @@ window.addEventListener('message', function(e) {
             savedModels = {};
             collapsedCategories = {};
             lockedFields = {};
+            benchmarkStats = null;
+            setBenchmarkButtonState(false);
+            compareProfiles = { enabled: false, a: '', b: '' };
+            if (restoreSlotSelect) restoreSlotSelect.value = '1';
 
             if (d.savedMap) savedModels = d.savedMap;
+            toggleSettingsPanel(false);
 
             activeTab = fields.length > 0 ? fields[0].cat : '';
             guideOpen = false;
@@ -1758,18 +2375,43 @@ window.addEventListener('message', function(e) {
             presetNameInput.value = modelName + (modelKey ? ' [' + modelKey + ']' : '');
 
             updateVehicleClassDisplay();
+            refreshClassSuggestions();
+            loadRollbackSlots();
+            captureRollbackSnapshot('open');
             overlay.classList.remove('hidden');
             buildUI();
             refreshPresetDropdown();
+            compareSelectA.value = 'builtin:daily';
+            compareSelectB.value = 'builtin:race';
             updateHistoryButtons();
             updateCategoryHeader();
             updateDiffToggle();
+            updateLiveDiffSummary();
             setStatus('Ready. Hover any field for a detailed description. Use 📋 GUIDE for step-by-step tuning.', '');
             break;
         }
         case 'close': {
             overlay.classList.add('hidden');
             closeGuide();
+            setBenchmarkButtonState(false);
+            break;
+        }
+        case 'benchmarkUpdate': {
+            benchmarkStats = d.data || null;
+            if (benchmarkStats) {
+                setBenchmarkButtonState(true);
+                setStatus(formatBenchmarkLine(benchmarkStats), 'warn');
+            }
+            break;
+        }
+        case 'benchmarkComplete': {
+            benchmarkStats = d.data || null;
+            setBenchmarkButtonState(false);
+            if (benchmarkStats) {
+                setStatus(`Benchmark complete. ${formatBenchmarkLine(benchmarkStats)}`, 'ok');
+            } else {
+                setStatus('Benchmark complete.', 'ok');
+            }
             break;
         }
     }
@@ -1780,4 +2422,11 @@ window.addEventListener('keydown', e => {
     if (e.key === 'Escape' && !overlay.classList.contains('hidden')) {
         doClose();
     }
+});
+
+window.addEventListener('click', e => {
+    if (!settingsPanel || settingsPanel.classList.contains('hidden')) return;
+    if (settingsPanel.contains(e.target)) return;
+    if (btnSettings && btnSettings.contains(e.target)) return;
+    toggleSettingsPanel(false);
 });

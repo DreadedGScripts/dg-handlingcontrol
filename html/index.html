@@ -27,16 +27,29 @@
                     <div class="hc-title">HANDLING CONTROL</div>
                     <div class="hc-subtitle" id="hc-vehicle-name">NO VEHICLE</div>
                     <div class="hc-subtitle hc-class-hint" id="hc-class-hint">CLASS HINT: NONE</div>
+                    <div class="hc-mode-badge" id="hc-mode-badge">GROUND MODE</div>
                 </div>
             </div>
             <div class="hc-header-actions">
                 <button class="hc-btn" id="btn-undo" title="Undo last change">↶ UNDO</button>
                 <button class="hc-btn" id="btn-redo" title="Redo last undone change">↷ REDO</button>
+                <button class="hc-btn" id="btn-benchmark" title="Start benchmark loop">⏱ BENCH</button>
+                <button class="hc-btn" id="btn-audit" title="View audit log">🧾 AUDIT</button>
+                <button class="hc-btn" id="btn-settings" title="Open UI settings">⚙ SETTINGS</button>
                 <button class="hc-btn hc-btn-blue"  id="btn-guide">📋 GUIDE</button>
                 <button class="hc-btn hc-btn-blue"  id="btn-diff">⇆ DIFF</button>
                 <button class="hc-btn hc-btn-green" id="btn-read-live">↻ REFRESH</button>
                 <button class="hc-btn hc-btn-amber" id="btn-reset-default">⟲ DEFAULTS</button>
                 <button class="hc-btn hc-btn-red"   id="btn-close">✕ CLOSE</button>
+            </div>
+            <div id="hc-settings-panel" class="hidden">
+                <div class="hc-settings-title">UI Theme</div>
+                <div class="hc-theme-grid">
+                    <button class="hc-theme-option" data-theme="dg-default">Classic</button>
+                    <button class="hc-theme-option" data-theme="dg-slate">Slate</button>
+                    <button class="hc-theme-option" data-theme="dg-sunset">Sunset</button>
+                    <button class="hc-theme-option" data-theme="dg-ice">Ice</button>
+                </div>
             </div>
         </div>
 
@@ -48,12 +61,31 @@
                 <select id="preset-select" title="Load a saved preset">
                     <option value="">— Load Preset —</option>
                 </select>
+                <select id="class-suggest-select" title="Suggested baseline by vehicle class">
+                    <option value="">— Class Suggestion —</option>
+                </select>
+                <button class="hc-btn hc-btn-blue" id="btn-apply-suggest">CLASS APPLY</button>
                 <input type="text" id="preset-name-input" placeholder="Preset name…" maxlength="48" spellcheck="false" autocomplete="off">
                 <button class="hc-btn hc-btn-green" id="btn-save-preset">💾 SAVE</button>
                 <button class="hc-btn hc-btn-blue" id="btn-export-xml">XML</button>
                 <button class="hc-btn" id="btn-export-preset">EXPORT</button>
                 <button class="hc-btn" id="btn-import-preset">IMPORT</button>
+                <select id="compare-select-a" title="Compare profile A">
+                    <option value="">Compare A</option>
+                </select>
+                <select id="compare-select-b" title="Compare profile B">
+                    <option value="">Compare B</option>
+                </select>
+                <button class="hc-btn hc-btn-blue" id="btn-compare-profiles">COMPARE A/B</button>
                 <button class="hc-btn hc-btn-red"   id="btn-delete-preset">🗑 DELETE</button>
+                <select id="restore-slot-select" title="Restore slot">
+                    <option value="1">Restore Slot 1 (Latest)</option>
+                    <option value="2">Restore Slot 2</option>
+                    <option value="3">Restore Slot 3</option>
+                    <option value="4">Restore Slot 4</option>
+                    <option value="5">Restore Slot 5</option>
+                </select>
+                <button class="hc-btn hc-btn-amber" id="btn-restore-preset">RESTORE PRESET</button>
             </div>
         </div>
 
@@ -107,11 +139,20 @@
 
         <!-- ── FOOTER ───────────────────────────────────────────────────────── -->
         <div id="hc-footer">
-            <span id="hc-status">Ready. Hover a field for details.</span>
+            <div id="hc-footer-meta">
+                <span id="hc-status">Ready. Hover a field for details.</span>
+                <span id="hc-live-diff">Live Diff: 0 changed (0.00%)</span>
+            </div>
             <div class="hc-footer-actions">
+                <button class="hc-btn" id="btn-snapshot">📌 SNAPSHOT</button>
+                <button class="hc-btn hc-btn-amber" id="btn-rollback">↩ ROLLBACK</button>
                 <label class="hc-toggle-wrap">
                     <input type="checkbox" id="toggle-live" checked>
                     <span class="hc-toggle-label">Live Preview</span>
+                </label>
+                <label class="hc-toggle-wrap">
+                    <input type="checkbox" id="toggle-expert">
+                    <span class="hc-toggle-label">Expert Mode</span>
                 </label>
                 <button class="hc-btn hc-btn-green large" id="btn-apply-all">▶ APPLY ALL</button>
             </div>

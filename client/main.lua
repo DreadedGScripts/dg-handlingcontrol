@@ -4,8 +4,42 @@
 
 local isOpen      = false
 local savedData   = {}   -- [modelHash] = handling table, loaded from server
+local restoreData = {}
+local auditData   = {}
 local currentVeh  = 0
 local reapplyThread = nil
+local benchmark = {
+    active = false,
+    vehicle = 0,
+    startTime = 0,
+    startPos = nil,
+    endPos = nil,
+    routePoints = {},
+    routeIndex = 1,
+    returnX = 0.0,
+    returnY = 0.0,
+    returnZ = 0.0,
+    returnHeading = nil,
+    runHeading = 0.0,
+    lastPos = nil,
+    distance = 0.0,
+    checkpoints = {},
+    checkpointIndex = 1,
+    phase = 'idle',
+    phaseStartTime = 0,
+    targetSpeedKmh = 160.0,
+    maneuverUntil = 0,
+    maneuverSteering = 0.0,
+    maneuverHandbrake = false,
+    accel0to100 = nil,
+    brakeStartDist = nil,
+    brake100to20 = nil,
+}
+local benchmarkBlip = 0
+local AIRPORT_BENCHMARK_START = vector3(-1314.20, -3018.60, 13.95)
+local AIRPORT_BENCHMARK_HEADING = 60.0
+local AIRPORT_BENCHMARK_DISTANCE = 700.0
+local BENCHMARK_DRIVE_STYLE = 786603
 
 local VEHICLE_CLASS_NAMES = {
     [0] = 'Compacts',
@@ -314,6 +348,117 @@ local HANDLING_FIELDS = {
     },
 }
 
+local AIRCRAFT_HANDLING_FIELDS = {
+    {
+        key='fThrust', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0.1, max=10, step=0.01, label='Thrust', cat='Flight',
+        desc='Primary forward thrust multiplier for aircraft acceleration and climb capability.',
+        tip='Higher = stronger acceleration and climb pull. Lower = sluggish aircraft response.',
+    },
+    {
+        key='fThrustFallOff', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Thrust Falloff', cat='Flight',
+        desc='Controls how quickly thrust effectiveness drops at higher speed.',
+        tip='Higher = power drops off earlier. Lower = maintains thrust at speed.',
+    },
+    {
+        key='fThrustVectoring', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Thrust Vectoring', cat='Flight',
+        desc='Influences directional control from thrust vector behavior.',
+        tip='Higher = more aggressive directional response from engine thrust.',
+    },
+    {
+        key='fYawMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Yaw Multiplier', cat='Flight',
+        desc='Yaw authority multiplier for turning around the vertical axis.',
+        tip='Higher = faster yaw turns. Lower = slower yaw response.',
+    },
+    {
+        key='fRollMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Roll Multiplier', cat='Flight',
+        desc='Roll authority multiplier for banking behavior.',
+        tip='Higher = snappier banking. Lower = slower roll-in.',
+    },
+    {
+        key='fPitchMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Pitch Multiplier', cat='Flight',
+        desc='Pitch authority multiplier for nose-up and nose-down response.',
+        tip='Higher = more responsive pitch. Lower = softer pitch control.',
+    },
+    {
+        key='fYawStabilise', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Yaw Stabilize', cat='Flight',
+        desc='Damping/stability force on yaw movement.',
+        tip='Higher = more stable yaw, less twitch. Lower = freer yaw rotation.',
+    },
+    {
+        key='fRollStabilise', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Roll Stabilize', cat='Flight',
+        desc='Damping/stability force on roll movement.',
+        tip='Higher = steadier roll. Lower = looser bank behavior.',
+    },
+    {
+        key='fPitchStabilise', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Pitch Stabilize', cat='Flight',
+        desc='Damping/stability force on pitch movement.',
+        tip='Higher = smoother pitch. Lower = more reactive pitch changes.',
+    },
+    {
+        key='fFormLiftMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Form Lift Multiplier', cat='Flight',
+        desc='Lift generated from aircraft body/wing form at speed.',
+        tip='Higher = more lift and easier sustained flight.',
+    },
+    {
+        key='fAttackLiftMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Attack Lift Multiplier', cat='Flight',
+        desc='Lift effect multiplier based on angle of attack.',
+        tip='Higher = stronger lift response when pitching into airflow.',
+    },
+    {
+        key='fAttackDiveMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Attack Dive Multiplier', cat='Flight',
+        desc='Dive behavior multiplier tied to angle of attack and pitch.',
+        tip='Higher = steeper/faster dive response.',
+    },
+    {
+        key='fGearDownDragV', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=20, step=0.01, label='Gear Down Drag', cat='Flight',
+        desc='Additional drag applied with landing gear extended.',
+        tip='Higher = greater speed loss with gear down.',
+    },
+    {
+        key='fGearDownLiftMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Gear Down Lift Mult', cat='Flight',
+        desc='Lift modifier applied while landing gear is down.',
+        tip='Tune to stabilize approach behavior with gear deployed.',
+    },
+    {
+        key='fWindMult', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Wind Multiplier', cat='Flight',
+        desc='How strongly wind and air disturbance affect the aircraft.',
+        tip='Higher = more turbulence sensitivity. Lower = steadier in wind.',
+    },
+    {
+        key='fMoveRes', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Move Resistance', cat='Flight',
+        desc='General movement resistance/inertia effect for aircraft motion.',
+        tip='Higher = heavier, damped movement. Lower = freer movement.',
+    },
+    {
+        key='fTurnRes', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Turn Resistance', cat='Flight',
+        desc='Resistance against turning and rotational changes.',
+        tip='Higher = slower turn-in, more stable. Lower = quicker rotation.',
+    },
+    {
+        key='fEngineOffGlideMulti', getter='GetVehicleHandlingFloat', setter='SetVehicleHandlingFloat', handlingClass='CFlyingHandlingData',
+        min=0, max=10, step=0.01, label='Engine Off Glide Mult', cat='Flight',
+        desc='Glide characteristic multiplier when engine power is reduced or off.',
+        tip='Higher = better glide retention without thrust.',
+    },
+}
+
 -- ─── Helpers ──────────────────────────────────────────────────────────────────
 local function getModelName(veh)
     return string.lower(GetLabelText(GetDisplayNameFromVehicleModel(GetEntityModel(veh))))
@@ -327,29 +472,375 @@ local function getVehicleClassInfo(veh)
     }
 end
 
-local function readAllFields(veh)
+local function isAircraftClass(classId)
+    return classId == 15 or classId == 16
+end
+
+local function getHandlingFieldsForVehicle(veh)
+    if veh == 0 or not DoesEntityExist(veh) then
+        return HANDLING_FIELDS
+    end
+    local classId = GetVehicleClass(veh)
+    if isAircraftClass(classId) then
+        return AIRCRAFT_HANDLING_FIELDS
+    end
+    return HANDLING_FIELDS
+end
+
+local function readAllFields(veh, fieldDefs)
+    local selectedFields = fieldDefs or getHandlingFieldsForVehicle(veh)
     local out = {}
-    for _, f in ipairs(HANDLING_FIELDS) do
+    for _, f in ipairs(selectedFields) do
+        local handlingClass = f.handlingClass or 'CHandlingData'
         if f.getter == 'GetVehicleHandlingFloat' then
-            out[f.key] = GetVehicleHandlingFloat(veh, 'CHandlingData', f.key)
+            out[f.key] = GetVehicleHandlingFloat(veh, handlingClass, f.key)
         elseif f.getter == 'GetVehicleHandlingInt' then
-            out[f.key] = GetVehicleHandlingInt(veh, 'CHandlingData', f.key)
+            out[f.key] = GetVehicleHandlingInt(veh, handlingClass, f.key)
         end
     end
     return out
 end
 
-local function applyHandling(veh, data)
-    for _, f in ipairs(HANDLING_FIELDS) do
+local function applyHandling(veh, data, fieldDefs)
+    local selectedFields = fieldDefs or getHandlingFieldsForVehicle(veh)
+    for _, f in ipairs(selectedFields) do
+        local handlingClass = f.handlingClass or 'CHandlingData'
         local val = data[f.key]
         if val ~= nil then
             if f.setter == 'SetVehicleHandlingFloat' then
-                SetVehicleHandlingFloat(veh, 'CHandlingData', f.key, val + 0.0)
+                SetVehicleHandlingFloat(veh, handlingClass, f.key, val + 0.0)
             elseif f.setter == 'SetVehicleHandlingInt' then
-                SetVehicleHandlingInt(veh, 'CHandlingData', f.key, math.floor(val))
+                SetVehicleHandlingInt(veh, handlingClass, f.key, math.floor(val))
             end
         end
     end
+end
+
+local function setBenchmarkVehicleProtection(veh, enabled)
+    if veh == 0 or not DoesEntityExist(veh) then
+        return
+    end
+
+    SetEntityInvincible(veh, enabled)
+    SetEntityCanBeDamaged(veh, not enabled)
+    SetEntityProofs(veh, enabled, enabled, enabled, enabled, enabled, enabled, enabled, enabled)
+    SetVehicleTyresCanBurst(veh, not enabled)
+    SetVehicleCanBeVisiblyDamaged(veh, not enabled)
+    SetDisableVehiclePetrolTankDamage(veh, enabled)
+    SetDisableVehiclePetrolTankFires(veh, enabled)
+end
+
+local function setBenchmarkPedProtection(enabled)
+    local ped = PlayerPedId()
+    if ped == 0 or not DoesEntityExist(ped) then
+        return
+    end
+
+    SetEntityInvincible(ped, enabled)
+    SetEntityCanBeDamaged(ped, not enabled)
+    SetPedCanRagdoll(ped, not enabled)
+end
+
+local function clearBenchmarkState()
+    local wasActive = benchmark.active
+    local prevVeh = benchmark.vehicle
+    benchmark.active = false
+    benchmark.vehicle = 0
+    benchmark.startTime = 0
+    benchmark.startPos = nil
+    benchmark.endPos = nil
+    benchmark.routePoints = {}
+    benchmark.routeIndex = 1
+    benchmark.returnX = 0.0
+    benchmark.returnY = 0.0
+    benchmark.returnZ = 0.0
+    benchmark.returnHeading = nil
+    benchmark.runHeading = 0.0
+    benchmark.lastPos = nil
+    benchmark.distance = 0.0
+    benchmark.checkpoints = {}
+    benchmark.checkpointIndex = 1
+    benchmark.phase = 'idle'
+    benchmark.phaseStartTime = 0
+    benchmark.targetSpeedKmh = 160.0
+    benchmark.maneuverUntil = 0
+    benchmark.maneuverSteering = 0.0
+    benchmark.maneuverHandbrake = false
+    benchmark.accel0to100 = nil
+    benchmark.brakeStartDist = nil
+    benchmark.brake100to20 = nil
+    if wasActive then
+        setBenchmarkVehicleProtection(prevVeh, false)
+        setBenchmarkPedProtection(false)
+        ClearPedTasks(PlayerPedId())
+    end
+    if benchmarkBlip ~= 0 and DoesBlipExist(benchmarkBlip) then
+        RemoveBlip(benchmarkBlip)
+    end
+    benchmarkBlip = 0
+end
+
+local function headingToDirection(heading)
+    local rad = math.rad(heading)
+    return vector3(-math.sin(rad), math.cos(rad), 0.0)
+end
+
+local function teleportVehicleToBenchmarkStart(veh)
+    if veh == 0 or not DoesEntityExist(veh) then
+        return false
+    end
+
+    SetEntityCoordsNoOffset(veh, AIRPORT_BENCHMARK_START.x, AIRPORT_BENCHMARK_START.y, AIRPORT_BENCHMARK_START.z, false, false, false)
+    SetEntityHeading(veh, AIRPORT_BENCHMARK_HEADING)
+    SetVehicleOnGroundProperly(veh)
+    SetEntityVelocity(veh, 0.0, 0.0, 0.0)
+    return true
+end
+
+local function returnFromBenchmarkLocation(veh)
+    if benchmark.returnX == 0.0 and benchmark.returnY == 0.0 and benchmark.returnZ == 0.0 then
+        return
+    end
+
+    local ped = PlayerPedId()
+    local returnHeading = benchmark.returnHeading or 0.0
+
+    if veh ~= 0 and DoesEntityExist(veh) then
+        if GetPedInVehicleSeat(veh, -1) ~= ped then
+            SetPedIntoVehicle(ped, veh, -1)
+        end
+        SetEntityCoordsNoOffset(veh, benchmark.returnX, benchmark.returnY, benchmark.returnZ, false, false, false)
+        SetEntityHeading(veh, returnHeading)
+        SetVehicleOnGroundProperly(veh)
+        SetEntityVelocity(veh, 0.0, 0.0, 0.0)
+    else
+        SetEntityCoordsNoOffset(ped, benchmark.returnX, benchmark.returnY, benchmark.returnZ, false, false, false)
+        SetEntityHeading(ped, returnHeading)
+    end
+end
+
+local function showBenchmarkMessage(text, durationMs)
+    BeginTextCommandPrint('STRING')
+    AddTextComponentSubstringPlayerName(tostring(text or 'Benchmark update'))
+    EndTextCommandPrint(durationMs or 3000, true)
+end
+
+local function getCurrentBenchmarkTarget()
+    if not benchmark.active then
+        return nil
+    end
+    if benchmark.phase == 'run' then
+        local node = benchmark.routePoints[benchmark.routeIndex]
+        return node and node.pos or benchmark.endPos
+    end
+    if benchmark.phase == 'brake' and benchmark.endPos then
+        return benchmark.endPos
+    end
+    if benchmark.checkpointIndex <= #benchmark.checkpoints then
+        return benchmark.checkpoints[benchmark.checkpointIndex]
+    end
+    return nil
+end
+
+local function updateBenchmarkRouteBlip()
+    local target = getCurrentBenchmarkTarget()
+    if not target then
+        if benchmarkBlip ~= 0 and DoesBlipExist(benchmarkBlip) then
+            RemoveBlip(benchmarkBlip)
+        end
+        benchmarkBlip = 0
+        return
+    end
+
+    if benchmarkBlip ~= 0 and DoesBlipExist(benchmarkBlip) then
+        RemoveBlip(benchmarkBlip)
+    end
+
+    benchmarkBlip = AddBlipForCoord(target.x, target.y, target.z)
+    SetBlipSprite(benchmarkBlip, 38)
+    SetBlipScale(benchmarkBlip, 0.85)
+    SetBlipColour(benchmarkBlip, 3)
+    SetBlipRoute(benchmarkBlip, true)
+    BeginTextCommandSetBlipName('STRING')
+    AddTextComponentSubstringPlayerName(benchmark.phase == 'run' and 'Benchmark Maneuver Point' or 'Benchmark Brake Zone')
+    EndTextCommandSetBlipName(benchmarkBlip)
+end
+
+local function buildAirportBenchmarkRoute(startPos)
+    local direction = headingToDirection(benchmark.runHeading)
+    local right = vector3(direction.y, -direction.x, 0.0)
+
+    local p1 = vector3(startPos.x + (direction.x * 220.0), startPos.y + (direction.y * 220.0), startPos.z)
+    local p2 = vector3(p1.x + (right.x * 140.0), p1.y + (right.y * 140.0), startPos.z)
+    local p3 = vector3(p2.x + (direction.x * 180.0), p2.y + (direction.y * 180.0), startPos.z)
+    local p4 = vector3(p3.x - (right.x * 160.0), p3.y - (right.y * 160.0), startPos.z)
+    local p5 = vector3(p4.x + (direction.x * 220.0), p4.y + (direction.y * 220.0), startPos.z)
+
+    return {
+        { pos = p1, maneuver = 'hard_right' },
+        { pos = p2, maneuver = 'handbrake_left' },
+        { pos = p3, maneuver = 'hard_left' },
+        { pos = p4, maneuver = 'handbrake_right' },
+        { pos = p5, maneuver = nil },
+    }
+end
+
+local function startAutoDriveToEnd(veh, target, speedKmh)
+    local ped = PlayerPedId()
+    if veh == 0 or not DoesEntityExist(veh) or not target then
+        return
+    end
+    SetDriverAbility(ped, 1.0)
+    SetDriverAggressiveness(ped, 1.0)
+    SetDriveTaskDrivingStyle(ped, BENCHMARK_DRIVE_STYLE)
+    TaskVehicleDriveToCoordLongrange(ped, veh, target.x, target.y, target.z, (speedKmh or 160.0) / 3.6, BENCHMARK_DRIVE_STYLE, 3.0)
+end
+
+local function beginManeuver(veh, maneuver)
+    if veh == 0 or not DoesEntityExist(veh) then
+        return
+    end
+
+    local now = GetGameTimer()
+    benchmark.maneuverUntil = 0
+    benchmark.maneuverSteering = 0.0
+    benchmark.maneuverHandbrake = false
+
+    if maneuver == 'hard_left' then
+        benchmark.maneuverUntil = now + 700
+        benchmark.maneuverSteering = -35.0
+        SetVehicleForwardSpeed(veh, math.min(GetEntitySpeed(veh), 38.0))
+        showBenchmarkMessage('AI hard left turn.', 1200)
+    elseif maneuver == 'hard_right' then
+        benchmark.maneuverUntil = now + 700
+        benchmark.maneuverSteering = 35.0
+        SetVehicleForwardSpeed(veh, math.min(GetEntitySpeed(veh), 38.0))
+        showBenchmarkMessage('AI hard right turn.', 1200)
+    elseif maneuver == 'handbrake_left' then
+        benchmark.maneuverUntil = now + 1200
+        benchmark.maneuverSteering = -48.0
+        benchmark.maneuverHandbrake = true
+        SetVehicleForwardSpeed(veh, math.min(GetEntitySpeed(veh), 32.0))
+        showBenchmarkMessage('AI handbrake left turn.', 1300)
+    elseif maneuver == 'handbrake_right' then
+        benchmark.maneuverUntil = now + 1200
+        benchmark.maneuverSteering = 48.0
+        benchmark.maneuverHandbrake = true
+        SetVehicleForwardSpeed(veh, math.min(GetEntitySpeed(veh), 32.0))
+        showBenchmarkMessage('AI handbrake right turn.', 1300)
+    end
+end
+
+local function updateManeuverState(veh)
+    if benchmark.maneuverUntil <= 0 then
+        return
+    end
+
+    local now = GetGameTimer()
+    if now <= benchmark.maneuverUntil then
+        SetVehicleSteeringAngle(veh, benchmark.maneuverSteering)
+        if benchmark.maneuverHandbrake then
+            SetVehicleHandbrake(veh, true)
+        end
+        return
+    end
+
+    SetVehicleSteeringAngle(veh, 0.0)
+    if benchmark.maneuverHandbrake then
+        SetVehicleHandbrake(veh, false)
+    end
+    benchmark.maneuverUntil = 0
+    benchmark.maneuverSteering = 0.0
+    benchmark.maneuverHandbrake = false
+end
+
+local function getBenchmarkPayload(veh, pos)
+    local now = GetGameTimer()
+    local elapsedSec = math.max(0.0, (now - benchmark.startTime) / 1000.0)
+    local speedKmh = GetEntitySpeed(veh) * 3.6
+    return {
+        active = benchmark.active,
+        elapsedSec = elapsedSec,
+        speedKmh = speedKmh,
+        distanceM = benchmark.distance,
+        checkpointIndex = math.max(0, benchmark.routeIndex - 1),
+        checkpointTotal = #benchmark.routePoints,
+        accel0to100Sec = benchmark.accel0to100 or 0.0,
+        brake100to20M = benchmark.brake100to20 or 0.0,
+    }
+end
+
+local function stopBenchmark(completed)
+    if not benchmark.active then
+        return
+    end
+    local veh = benchmark.vehicle
+    local pos = benchmark.lastPos or (veh ~= 0 and DoesEntityExist(veh) and GetEntityCoords(veh) or vector3(0.0, 0.0, 0.0))
+    local payload = getBenchmarkPayload((veh ~= 0 and DoesEntityExist(veh) and veh) or PlayerPedId(), pos)
+    SendNUIMessage({
+        type = completed and 'benchmarkComplete' or 'benchmarkUpdate',
+        data = payload,
+    })
+    if completed then
+        showBenchmarkMessage(('Benchmark complete | t %.2fs | 0-100 %.2fs | brake %.1fm'):format(
+            payload.elapsedSec or 0.0,
+            payload.accel0to100Sec or 0.0,
+            payload.brake100to20M or 0.0
+        ), 5500)
+    else
+        showBenchmarkMessage('Benchmark stopped.', 2500)
+    end
+    setBenchmarkVehicleProtection(veh, false)
+    setBenchmarkPedProtection(false)
+    returnFromBenchmarkLocation(veh)
+    clearBenchmarkState()
+end
+
+local function startBenchmark()
+    local ped = PlayerPedId()
+    local veh = GetVehiclePedIsIn(ped, false)
+    if veh == 0 or GetPedInVehicleSeat(veh, -1) ~= ped then
+        return false
+    end
+
+    local returnPos = GetEntityCoords(veh)
+    local returnHeading = GetEntityHeading(veh)
+    local maxFlatVel = GetVehicleHandlingFloat(veh, 'CHandlingData', 'fInitialDriveMaxFlatVel')
+    local targetSpeed = math.min(260.0, math.max(130.0, (maxFlatVel or 160.0) * 1.05))
+
+    clearBenchmarkState()
+
+    if not teleportVehicleToBenchmarkStart(veh) then
+        return false
+    end
+
+    local pos = GetEntityCoords(veh)
+    benchmark.active = true
+    benchmark.vehicle = veh
+    benchmark.startTime = GetGameTimer()
+    benchmark.startPos = pos
+    benchmark.returnX = returnPos.x + 0.0
+    benchmark.returnY = returnPos.y + 0.0
+    benchmark.returnZ = returnPos.z + 0.0
+    benchmark.returnHeading = returnHeading
+    benchmark.runHeading = AIRPORT_BENCHMARK_HEADING
+    benchmark.routePoints = buildAirportBenchmarkRoute(pos)
+    benchmark.routeIndex = 1
+    benchmark.endPos = benchmark.routePoints[#benchmark.routePoints].pos
+    benchmark.lastPos = pos
+    benchmark.checkpoints = { benchmark.endPos }
+    benchmark.phase = 'run'
+    benchmark.phaseStartTime = benchmark.startTime
+    benchmark.targetSpeedKmh = targetSpeed
+
+    setBenchmarkVehicleProtection(veh, true)
+    setBenchmarkPedProtection(true)
+
+    startAutoDriveToEnd(veh, benchmark.routePoints[benchmark.routeIndex].pos, benchmark.targetSpeedKmh)
+    updateBenchmarkRouteBlip()
+    showBenchmarkMessage(('Teleported to LSIA runway. Aggressive AI course started with hard and handbrake turns at %.0f km/h.'):format(benchmark.targetSpeedKmh), 4500)
+
+    return true
 end
 
 -- ─── Auto-apply on enter ──────────────────────────────────────────────────────
@@ -392,15 +883,16 @@ local function openEditor()
     if veh == 0 then
         SendNUIMessage({ type = 'open', fields = HANDLING_FIELDS, current = {}, modelName = 'NO VEHICLE', savedMap = savedData })
     else
+        local activeFields = getHandlingFieldsForVehicle(veh)
         currentVeh = veh
         local model    = GetEntityModel(veh)
         local modelKey = tostring(model)
-        local current  = readAllFields(veh)
+        local current  = readAllFields(veh, activeFields)
         local displayName = GetDisplayNameFromVehicleModel(model)
         local vehicleClass = getVehicleClassInfo(veh)
         SendNUIMessage({
             type      = 'open',
-            fields    = HANDLING_FIELDS,
+            fields    = activeFields,
             current   = current,
             modelName = displayName,
             modelKey  = modelKey,
@@ -493,6 +985,49 @@ RegisterNUICallback('deleteHandling', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('requestAudit', function(_, cb)
+    cb({
+        audit = auditData,
+        restore = restoreData,
+    })
+    TriggerServerEvent('dg-handlingcontrol:server:requestAudit')
+end)
+
+RegisterNUICallback('restorePreset', function(data, cb)
+    local presetName = type(data.presetName) == 'string' and data.presetName or ''
+    local slotIndex = tonumber(data.slotIndex) or 1
+    if presetName == '' then
+        cb({ ok = false, reason = 'missing_preset' })
+        return
+    end
+
+    local bucket = restoreData[presetName]
+    if type(bucket) ~= 'table' or #bucket == 0 then
+        cb({ ok = false, reason = 'no_restore_points' })
+        return
+    end
+
+    slotIndex = math.max(1, math.floor(slotIndex))
+    if slotIndex > #bucket then
+        slotIndex = 1
+    end
+
+    local point = bucket[slotIndex]
+    if type(point) ~= 'table' or type(point.handling) ~= 'table' then
+        cb({ ok = false, reason = 'invalid_restore_data' })
+        return
+    end
+
+    savedData[presetName] = point.handling
+    TriggerServerEvent('dg-handlingcontrol:server:restore', presetName, slotIndex)
+    cb({
+        ok = true,
+        presetName = presetName,
+        handling = point.handling,
+        modelKey = point.modelKey or point.handling._modelKey or '',
+    })
+end)
+
 -- Reset vehicle handling to game defaults (re-applies original model data)
 RegisterNUICallback('resetToDefault', function(_, cb)
     local veh = GetVehiclePedIsIn(PlayerPedId(), false)
@@ -517,6 +1052,19 @@ RegisterNUICallback('resetToDefault', function(_, cb)
     end
 end)
 
+RegisterNUICallback('benchmarkStart', function(_, cb)
+    local ok = startBenchmark()
+    if ok then
+        closeEditor()
+    end
+    cb({ ok = ok })
+end)
+
+RegisterNUICallback('benchmarkStop', function(_, cb)
+    stopBenchmark(false)
+    cb({ ok = true })
+end)
+
 -- Close NUI
 RegisterNUICallback('close', function(_, cb)
     closeEditor()
@@ -525,8 +1073,16 @@ end)
 
 -- ─── Server → Client: receive saved data on resource start ───────────────────
 RegisterNetEvent('dg-handlingcontrol:client:loadSaved')
-AddEventHandler('dg-handlingcontrol:client:loadSaved', function(data)
+AddEventHandler('dg-handlingcontrol:client:loadSaved', function(data, restore, audit)
     savedData = data or {}
+    restoreData = restore or {}
+    auditData = audit or {}
+end)
+
+RegisterNetEvent('dg-handlingcontrol:client:auditData')
+AddEventHandler('dg-handlingcontrol:client:auditData', function(audit, restore)
+    auditData = audit or {}
+    restoreData = restore or {}
 end)
 
 -- Request saved data when we connect / resource starts
@@ -540,4 +1096,96 @@ end)
 CreateThread(function()
     Wait(3000)
     TriggerServerEvent('dg-handlingcontrol:server:requestSaved')
+end)
+
+CreateThread(function()
+    while true do
+        if not benchmark.active then
+            Wait(250)
+        else
+            Wait(100)
+            local ped = PlayerPedId()
+            local veh = GetVehiclePedIsIn(ped, false)
+            if veh == 0 or veh ~= benchmark.vehicle or not DoesEntityExist(veh) then
+                stopBenchmark(false)
+                goto continue
+            end
+
+            -- Re-apply protection every tick in case other scripts/natives reset it.
+            setBenchmarkVehicleProtection(veh, true)
+            setBenchmarkPedProtection(true)
+
+            DisableControlAction(0, 71, true)
+            DisableControlAction(0, 72, true)
+            DisableControlAction(0, 59, true)
+            DisableControlAction(0, 60, true)
+            DisableControlAction(0, 75, true)
+            SetVehicleDensityMultiplierThisFrame(0.0)
+            SetRandomVehicleDensityMultiplierThisFrame(0.0)
+            SetParkedVehicleDensityMultiplierThisFrame(0.0)
+            SetPedDensityMultiplierThisFrame(0.0)
+            SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
+
+            local pos = GetEntityCoords(veh)
+            if benchmark.lastPos then
+                benchmark.distance = benchmark.distance + #(pos - benchmark.lastPos)
+            end
+            benchmark.lastPos = pos
+
+            local speedKmh = GetEntitySpeed(veh) * 3.6
+            if not benchmark.accel0to100 and speedKmh >= 100.0 then
+                benchmark.accel0to100 = (GetGameTimer() - benchmark.startTime) / 1000.0
+                benchmark.brakeStartDist = benchmark.distance
+            end
+            if benchmark.brakeStartDist and not benchmark.brake100to20 and speedKmh <= 20.0 then
+                benchmark.brake100to20 = math.max(0.0, benchmark.distance - benchmark.brakeStartDist)
+            end
+
+            if benchmark.phase == 'run' then
+                local node = benchmark.routePoints[benchmark.routeIndex]
+                if node and #(pos - node.pos) <= 18.0 then
+                    beginManeuver(veh, node.maneuver)
+                    benchmark.routeIndex = benchmark.routeIndex + 1
+                    if benchmark.routeIndex <= #benchmark.routePoints then
+                        local nextNode = benchmark.routePoints[benchmark.routeIndex]
+                        startAutoDriveToEnd(veh, nextNode.pos, benchmark.targetSpeedKmh)
+                    else
+                        benchmark.phase = 'brake'
+                        benchmark.phaseStartTime = GetGameTimer()
+                        if not benchmark.brakeStartDist then
+                            benchmark.brakeStartDist = benchmark.distance
+                        end
+                        TaskVehicleTempAction(ped, veh, 24, 3000)
+                        showBenchmarkMessage('Final point reached. AI braking for distance capture...', 3200)
+                    end
+                    updateBenchmarkRouteBlip()
+                end
+            end
+
+            updateManeuverState(veh)
+
+            if benchmark.phase == 'brake' then
+                local brakeElapsed = (GetGameTimer() - benchmark.phaseStartTime) / 1000.0
+                if benchmark.brake100to20 then
+                    stopBenchmark(true)
+                    goto continue
+                end
+                if brakeElapsed >= 4.5 then
+                    stopBenchmark(true)
+                    goto continue
+                end
+            end
+
+            local target = getCurrentBenchmarkTarget()
+            if target then
+                DrawMarker(1, target.x, target.y, target.z - 1.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 6.0, 1.5, 80, 168, 232, 180, false, true, 2, false, nil, nil, false)
+            end
+
+            SendNUIMessage({
+                type = 'benchmarkUpdate',
+                data = getBenchmarkPayload(veh, pos),
+            })
+        end
+        ::continue::
+    end
 end)
