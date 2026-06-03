@@ -858,7 +858,23 @@ const liveDiffEl = document.getElementById('hc-live-diff');
 
 let modalMode = '';
 const THEME_KEY = 'dg.handlingcontrol.theme';
-const AVAILABLE_THEMES = ['dg-default', 'dg-slate', 'dg-sunset', 'dg-ice'];
+const DEFAULT_THEME = 'dg-slate';
+const AVAILABLE_THEMES = [
+    'dg-default',
+    'dg-slate',
+    'dg-sunset',
+    'dg-ice',
+    'dg-carbon',
+    'dg-ocean',
+    'dg-forest',
+    'dg-ember',
+    'dg-royal',
+    'dg-noir',
+    'dg-sand',
+    'dg-mint',
+    'dg-crimson',
+    'dg-voltage',
+];
 
 function updateThemeButtons(theme) {
     for (const btn of themeButtons) {
@@ -867,7 +883,7 @@ function updateThemeButtons(theme) {
 }
 
 function applyTheme(theme, persist = true) {
-    const selected = AVAILABLE_THEMES.includes(theme) ? theme : 'dg-default';
+    const selected = AVAILABLE_THEMES.includes(theme) ? theme : DEFAULT_THEME;
     document.documentElement.setAttribute('data-theme', selected);
     updateThemeButtons(selected);
     if (persist) {
@@ -876,7 +892,7 @@ function applyTheme(theme, persist = true) {
 }
 
 function loadThemePreference() {
-    const saved = localStorage.getItem(THEME_KEY) || 'dg-default';
+    const saved = localStorage.getItem(THEME_KEY) || DEFAULT_THEME;
     applyTheme(saved, false);
 }
 
