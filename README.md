@@ -18,11 +18,11 @@
 
 ## 📋 Overview
 
-**DG Handling Control** is a free, fully standalone in-game vehicle handling editor for FiveM. Authorised players open a full-screen NUI panel that reads live handling values from the vehicle they are sitting in, lets them tune every field in real time, and saves presets permanently to disk — auto-applied every time any player enters that vehicle model.
+**DG Handling Control** is a free, fully standalone in-game vehicle handling editor for FiveM. Authorised players open a responsive full-screen NUI panel that reads live handling values from the vehicle they are sitting in, lets them tune every field in real time, and saves presets permanently to disk — auto-applied every time any player enters that vehicle model.
 
 A built-in **step-by-step tuning guide** walks through all 8 tuning phases in order, highlights the relevant fields on-screen, and explains exactly what each setting does and how it affects the car. Every field also shows a detailed hover **tooltip** with a full description and a quick ↑/↓ effect summary.
 
-The latest update adds a complete quality-of-life workflow: searchable fields, per-field reset and lock controls, undo/redo history, side-by-side diff view, built-in baseline presets (Race, Drift, Off-Road, Daily), non-blocking import/export modal tools, and class-aware tuning hints shown in the header.
+The current build adds a much broader quality-of-life workflow: searchable fields, per-field reset and lock controls, undo/redo history, side-by-side diffing, profile-vs-profile comparison, a large built-in preset library, non-blocking import/export and XML tools, live vehicle upgrade readouts, a theme/settings panel with Slate as the default theme, and an AI benchmark course that teleports the vehicle to LSIA for repeatable testing.
 
 | Property | Value |
 |----------|-------|
@@ -32,7 +32,7 @@ The latest update adds a complete quality-of-life workflow: searchable fields, p
 | **Framework Support** | **100% Standalone** — no QBCore, ESX, Qbox, or ox required |
 | **Persistence** | JSON file saved to `data/saved_handlings.json` |
 | **Permissions** | FiveM native ace permissions |
-| **NUI** | Full-screen dark-theme panel (FiveM NUI / CEF) |
+| **NUI** | Responsive full-screen multi-theme panel (FiveM NUI / CEF) |
 
 ---
 
@@ -59,9 +59,14 @@ The latest update adds a complete quality-of-life workflow: searchable fields, p
 - **Undo / Redo history** — walk backward and forward through tuning changes in-session
 - **Side-by-side diff view** — compare current tuning against selected preset (or stock/original when none selected)
 - **Preset system** — save named handling presets per vehicle model, load and delete from a dropdown
-- **Built-in baseline presets** — one-click starter tunes for Race, Drift, Off-Road, and Daily
+- **Large built-in preset library** — 27 one-click starter profiles covering race, time attack, drag, multiple drift styles, off-road, rally, daily, pursuit, armored, towing, and aircraft tuning
 - **Import / Export modal** — non-blocking JSON/Base64 workflow for sharing presets (plus XML export for handling.meta)
+- **Profile-vs-profile comparison** — load preset A vs preset B directly into the DIFF panel for side-by-side comparison without applying either one
 - **Vehicle class auto-detect** — class label + class-aware tuning focus hint shown in header
+- **Upgrade detection in header** — live summary for engine, brakes, transmission, suspension, armor, and turbo state
+- **Theme/settings panel** — 14 built-in UI themes with **Slate** as the default, plus persistent theme selection
+- **Responsive layout improvements** — settings panel, toolbar, export tools, and modals are adjusted for different resolutions and smaller screens
+- **Benchmark mode** — one-click LSIA runway benchmark with AI driving line, hard turns, handbrake turns, route blip, 0-100 timing, and braking-distance results
 - **Auto-apply on enter** — saved presets are silently re-applied whenever any player enters that vehicle model (GTA resets handling on stream events)
 - **Permission system** — ace-permission gated; toggle `Config.RequirePermission` for open access or locked-down admin-only use
 - **Ace deny logging** — server logs permission denials with player name to console
@@ -135,15 +140,19 @@ add_ace group.admin dg-handlingcontrol.use allow
 10. Hover any field for a detailed tooltip explaining what it does
 11. Click **💾 SAVE** to persist the preset — it will auto-apply server-wide from then on
 12. Use **EXPORT / IMPORT** to share presets, and **XML** for handling.meta export
-13. Press **Escape** or click **✕ CLOSE** to exit
+13. Use **⚙ SETTINGS** to switch themes; Slate is the default theme
+14. Use **BENCHMARK** to launch the LSIA runway test and review 0-100 / braking metrics
+15. Use **COMPARE PROFILES** to diff two saved or built-in presets against each other
+16. Press **Escape** or click **✕ CLOSE** to exit
 
 ### Suggested tuning flow
 
 1. Open panel in target vehicle and review class hint in the header
-2. Load a built-in baseline closest to your goal (Race, Drift, Off-Road, Daily)
+2. Load a built-in baseline closest to your goal from the larger preset library
 3. Lock critical fields before testing alternate presets
-4. Tune one category at a time using guide steps and diff view
-5. Save with a clear preset name and export if you want to share
+4. Tune one category at a time using guide steps, upgrade readout, and diff view
+5. Use benchmark mode when you want repeatable before/after testing
+6. Save with a clear preset name and export if you want to share
 
 ### Guide Tabs (manual navigation)
 
@@ -194,9 +203,12 @@ TriggerServerEvent('dg-handlingcontrol:server:delete', presetName)
 | `applyField` | Live-apply a single field change to the vehicle |
 | `applyAll` | Apply a full handling snapshot to the vehicle |
 | `readFields` | Read all current live values from the vehicle |
+| `getVehicleUpgrades` | Read current installed upgrade levels and turbo state |
 | `saveHandling` | Persist a handling preset via server |
 | `deleteHandling` | Delete a saved preset via server |
 | `resetToDefault` | Re-read GTA default values for the current vehicle |
+| `benchmarkStart` | Start the LSIA benchmark course |
+| `benchmarkStop` | Stop the active benchmark run |
 | `close` | Release NUI focus and close the panel |
 
 ---
